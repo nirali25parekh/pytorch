@@ -62,6 +62,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     clone_input_helper,
+    decorateIf,
     first_sample,
     HardwareClassification,
     IS_CI,
@@ -753,15 +754,17 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
+    @decorateIf(
+        unittest.skip(
+            "Skipped _refs.div.floor_rounding with bfloat16Divide by 0: _refs produces NaN, torch produces +/-inf"
+        ),
+        lambda p: p["op"].full_name == "_refs.div.floor_rounding"
+        and p["dtype"] == torch.bfloat16,
+    )
     def test_python_ref_torch_fallback(self, device, dtype, op):
         # In this test, refs call into the torch namespace (after the initial invocation)
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
         # Direct calls to refs and prims are not translated
-        if op.full_name == "_refs.div.floor_rounding" and dtype == torch.bfloat16:
-            self.skipTest(
-                "Skipped _refs.div.floor_rounding with bfloat16"
-                "Divide by 0: _refs produces NaN, torch produces +/-inf"
-            )
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @onlyAccelerator
@@ -937,13 +940,17 @@ class TestCommon(TestCase):
     # Cases test here:
     #   - out= with the correct dtype and device, but the wrong shape
     @ops(ops_and_refs, dtypes=OpDTypes.none)
+    @decorateIf(
+        unittest.skip("Skipped! Op has not supported dtypes on this device."),
+        lambda p: not p["op"].supported_dtypes(torch.device(p["device"]).type),
+    )
+    @decorateIf(
+        unittest.skip("flaky"),
+        lambda p: TEST_WITH_TORCHDYNAMO and p["op"].name == "_refs.clamp",
+    )
     def test_out_warning(self, device, op):
-        if TEST_WITH_TORCHDYNAMO and op.name == "_refs.clamp":
-            self.skipTest("flaky")
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         supported_dtypes = op.supported_dtypes(self.device_type)
-        if len(supported_dtypes) == 0:
-            self.skipTest("Skipped! Op has not supported dtypes on this device.")
         dtype = (
             torch.float32
             if torch.float32 in supported_dtypes
@@ -2016,14 +2023,12 @@ class TestCompositeCompliance(TestCase):
             skip("topk", variant_name="cutedsl_optimized_deterministic"),
         }
     )
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops([op for op in op_db if op.supports_forward_ad], allowed_dtypes=(torch.float,))
+    @decorateIf(
+        unittest.skip("Does not support autograd"),
+        lambda p: torch.float not in p["op"].supported_backward_dtypes(p["device"]),
+    )
     def test_forward_ad(self, device, dtype, op):
-        if torch.float not in op.supported_backward_dtypes(device):
-            raise unittest.SkipTest("Does not support autograd")
-
-        if not op.supports_forward_ad:
-            raise unittest.SkipTest("Does not support forward_ad")
-
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         for sample in samples:
@@ -2451,10 +2456,11 @@ class TestMathBits(TestCase):
 
                         self.assertEqual(tensor.grad, cloned1_tensor.grad)
 
-    @ops(ops_and_refs, allowed_dtypes=(torch.cfloat,))
+    @ops(
+        [op for op in ops_and_refs if op.test_conjugated_samples],
+        allowed_dtypes=(torch.cfloat,),
+    )
     def test_conj_view(self, device, dtype, op):
-        if not op.test_conjugated_samples:
-            self.skipTest("Operation doesn't support conjugated inputs.")
         math_op_physical = torch.conj_physical
         math_op_view = torch.conj
         _requires_grad = torch.cfloat in op.supported_backward_dtypes(
@@ -2473,10 +2479,10 @@ class TestMathBits(TestCase):
             torch.is_complex,
         )
 
-    @ops(ops_and_refs, allowed_dtypes=(torch.double,))
+    @ops(
+        [op for op in ops_and_refs if op.test_neg_view], allowed_dtypes=(torch.double,)
+    )
     def test_neg_view(self, device, dtype, op):
-        if not op.test_neg_view:
-            self.skipTest("Operation not tested with tensors with negative bit.")
         math_op_physical = torch.neg
         math_op_view = torch._neg_view
         is_bit_set = torch.is_neg
@@ -2492,13 +2498,11 @@ class TestMathBits(TestCase):
             lambda x: True,
         )
 
-    @ops(ops_and_refs, allowed_dtypes=(torch.cdouble,))
+    @ops(
+        [op for op in ops_and_refs if op.test_neg_view and op.test_conjugated_samples],
+        allowed_dtypes=(torch.cdouble,),
+    )
     def test_neg_conj_view(self, device, dtype, op):
-        if not op.test_neg_view:
-            self.skipTest("Operation not tested with tensors with negative bit.")
-        if not op.test_conjugated_samples:
-            self.skipTest("Operation doesn't support conjugated inputs.")
-
         def math_op_physical(x):
             return -x.conj_physical()
 
@@ -2773,12 +2777,12 @@ class TestRefsOpsInfo(TestCase):
         "_refs.native_layer_norm",
     }
 
-    @parametrize("op", ref_ops_names)
+    @parametrize(
+        "op", tuple(itertools.filterfalse(skip_ref_ops.__contains__, ref_ops_names))
+    )
     def test_refs_are_in_python_ref_db(self, op):
         inplace = op[-1] == "_"
-        if op in self.skip_ref_ops:
-            raise unittest.SkipTest(f"{op} does not have an entry in python_ref_db")
-        elif inplace:
+        if inplace:
             self.assertNotIn(
                 op,
                 self.ref_db_names,
@@ -2959,6 +2963,15 @@ fake_backward_mps_xfails = {
 }
 
 
+fake_op_db = [
+    op
+    for op in op_db
+    if op.full_name not in fake_skips
+    and "sparse" not in op.full_name
+    and "jiterator" not in op.full_name
+]
+
+
 @unMarkDynamoStrictTest
 class TestFakeTensor(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -2979,11 +2992,7 @@ class TestFakeTensor(TestCase):
         self.addCleanup(cache_crosscheck.stop)
 
     def _test_fake_helper(self, device, dtype, op, context):
-        name = op.name
-        if op.variant_test_name:
-            name += "." + op.variant_test_name
-        if name in fake_skips or "sparse" in name or "jiterator" in name:
-            self.skipTest("Skip failing test")
+        name = op.full_name
 
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
@@ -3090,14 +3099,8 @@ class TestFakeTensor(TestCase):
             xfail("linalg.ldl_solve", device_type="mps"),
         }
     )
-    @ops(op_db, dtypes=OpDTypes.any_one)
+    @ops(fake_op_db, dtypes=OpDTypes.any_one)
     def test_pointwise_ops(self, device, dtype, op):
-        name = op.name
-        if op.variant_test_name:
-            name += "." + op.variant_test_name
-        if name in fake_skips or "sparse" in name or "jiterator" in name:
-            self.skipTest("Skip failing test")
-
         test_self = self
 
         class TestPointwiseMode(TorchDispatchMode):
@@ -3151,7 +3154,7 @@ class TestFakeTensor(TestCase):
         }
         | fake_mps_xfails
     )
-    @ops(op_db, dtypes=OpDTypes.any_one)
+    @ops(fake_op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
         self._test_fake_helper(device, dtype, op, contextlib.nullcontext)
 
@@ -3163,11 +3166,14 @@ class TestFakeTensor(TestCase):
         }
         | fake_mps_xfails
     )
-    @ops(op_db, dtypes=OpDTypes.any_one)
+    @ops(fake_op_db, dtypes=OpDTypes.any_one)
+    @decorateIf(
+        unittest.skip("Skip failing test"),
+        lambda p: p["op"].name
+        in fake_autocast_device_skips[torch.device(p["device"]).type],
+    )
     def test_fake_autocast(self, device, dtype, op):
         device_type = torch.device(device).type
-        if op.name in fake_autocast_device_skips[device_type]:
-            self.skipTest("Skip failing test")
 
         def context_fn():
             return torch.amp.autocast(device_type)
@@ -3241,18 +3247,19 @@ class TestForwardADWithScalars(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @ops(
-        [op for op in op_db if op.name in ["mul", "add", "div"]],
+        [
+            op
+            for op in op_db
+            if op.name in ["mul", "add", "div"] and op.supports_forward_ad
+        ],
         allowed_dtypes=(torch.float32,),
+    )
+    @decorateIf(
+        unittest.skip("Does not support autograd"),
+        lambda p: torch.float not in p["op"].supported_backward_dtypes(p["device"]),
     )
     def test_0d_tensor_with_python_scalar(self, device, dtype, op):
         """Test that forward AD preserves dtype when combining 0D tensors with Python scalars."""
-        if torch.float not in op.supported_backward_dtypes(device):
-            raise unittest.SkipTest("Does not support autograd")
-
-        # skip if operator doesn't support forward AD
-        if not op.supports_forward_ad:
-            raise unittest.SkipTest("Does not support forward_ad")
-
         # create 0D tensors
         primal0d = torch.ones((), device=device, dtype=dtype)
         tangent0d = torch.ones((), device=device, dtype=dtype)

@@ -2,7 +2,7 @@
 
 import functools
 import itertools
-from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
+from unittest import expectedFailure as xfail, skipIf as skipif
 
 from pytest import raises as assert_raises
 
@@ -1021,8 +1021,8 @@ class TestEinsum(TestCase):
         # contig + contig + contig -> scalar
 
         if dtype in ["e", "B", "b"]:
-            # FIXME make xfail
-            raise SkipTest("overflow differs in pytorch and numpy")
+            # The checks above apply, but overflow behavior differs.
+            return
 
         arr = np.array([0.5, 0.5, 0.25, 4.5, 3.0], dtype=dtype)
         res = np.einsum("i,i,i->", arr, arr, arr)

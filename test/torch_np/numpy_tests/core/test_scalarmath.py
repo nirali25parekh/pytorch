@@ -6,13 +6,14 @@ import itertools
 import operator
 import sys
 import warnings
-from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
+from unittest import expectedFailure as xfail, skipIf as skipif
 
 import numpy
 import pytest
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -346,11 +347,11 @@ class TestModulus(TestCase):
                         assert_(b > rem >= 0, msg)
 
     @parametrize("dt", "efd")
+    @decorateIf(
+        skip(reason="RuntimeError: 'nextafter_cpu' not implemented for 'Half'"),
+        lambda p: p["dt"] == "e",
+    )
     def test_float_modulus_corner_cases(self, dt):
-        if dt == "e":
-            # FIXME: make xfail
-            raise SkipTest("RuntimeError: 'nextafter_cpu' not implemented for 'Half'")
-
         b = np.array(1.0, dtype=dt)
         a = np.nextafter(np.array(0.0, dtype=dt), -b)
         rem = operator.mod(a, b)
@@ -725,14 +726,20 @@ class TestAbs(TestCase):
 class TestBitShifts(TestCase):
     @parametrize("type_code", np.typecodes["AllInteger"])
     @parametrize("op", [operator.rshift, operator.lshift])
+    @decorateIf(
+        skip(reason="NYI: bitshift uint64"),
+        lambda p: np.dtype(p["type_code"])
+        in (np.dtype(np.uint64), np.dtype(np.uint32), np.dtype(np.uint16)),
+    )
+    @decorateIf(
+        skip(reason="https://github.com/pytorch/pytorch/issues/70904"),
+        lambda p: p["type_code"] in ("i", "l"),
+    )
     def test_shift_all_bits(self, type_code, op):
         """Shifts where the shift amount is the width of the type or wider"""
         # gh-2449
         dt = np.dtype(type_code)
         nbits = dt.itemsize * 8
-        if dt in (np.dtype(np.uint64), np.dtype(np.uint32), np.dtype(np.uint16)):
-            raise SkipTest("NYI: bitshift uint64")
-
         for val in [5, -5]:
             for shift in [nbits, nbits + 4]:
                 val_scl = np.array(val).astype(dt)[()]
@@ -743,11 +750,6 @@ class TestBitShifts(TestCase):
                     # sign bit is preserved
                     assert_equal(res_scl, -1)
                 else:
-                    if type_code in ("i", "l") and shift == np.iinfo(type_code).bits:
-                        # FIXME: make xfail
-                        raise SkipTest(
-                            "https://github.com/pytorch/pytorch/issues/70904"
-                        )
                     assert_equal(res_scl, 0)
 
                 # Result on scalars should be the same as on arrays

@@ -31,6 +31,7 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -920,10 +921,11 @@ class TestAfterAotAccelerator(torch._dynamo.test_case.TestCase):
 
 
 class TestWrapCompilerDebugSync(torch._dynamo.test_case.TestCase):
+    @decorateIf(
+        unittest.skip("sync only triggered for non-CPU devices"),
+        lambda params: torch.device(params["device"]).type == "cpu",
+    )
     def test_synchronize_called_for_accelerator_tensor(self, device):
-        if torch.device(device).type == "cpu":
-            self.skipTest("sync only triggered for non-CPU devices")
-
         from torch._dynamo.repro.after_aot import wrap_compiler_debug
 
         called = []
@@ -947,10 +949,11 @@ class TestWrapCompilerDebugSync(torch._dynamo.test_case.TestCase):
 
         self.assertGreater(len(called), 0)
 
+    @decorateIf(
+        unittest.skip("sync only triggered for non-CPU devices"),
+        lambda params: torch.device(params["device"]).type == "cpu",
+    )
     def test_inductor_fails_syncs_on_accelerator_tensor(self, device):
-        if torch.device(device).type == "cpu":
-            self.skipTest("sync only triggered for non-CPU devices")
-
         from torch._dynamo.repro.after_aot import inductor_fails
 
         called = []
@@ -974,10 +977,11 @@ class TestWrapCompilerDebugSync(torch._dynamo.test_case.TestCase):
 
         self.assertGreater(len(called), 0)
 
+    @decorateIf(
+        unittest.skip("sync only triggered for non-CPU devices"),
+        lambda params: torch.device(params["device"]).type == "cpu",
+    )
     def test_repro_run_syncs_on_accelerator_tensor(self, device):
-        if torch.device(device).type == "cpu":
-            self.skipTest("sync only triggered for non-CPU devices")
-
         import argparse
 
         from torch._dynamo.repro.after_aot import repro_run

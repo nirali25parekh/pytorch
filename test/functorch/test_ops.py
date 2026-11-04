@@ -354,6 +354,16 @@ def is_inplace(op, variant):
     return variant is op.get_inplace()
 
 
+_all_ops = op_db + additional_op_db + autograd_function_db
+_autograd_ops = [op for op in _all_ops if op.supports_autograd]
+_outplace_autograd_ops = [op for op in _autograd_ops if not is_inplace(op, op.get_op())]
+_forward_ad_ops = [op for op in _all_ops if op.supports_forward_ad]
+_outplace_forward_ad_ops = [
+    op for op in _forward_ad_ops if not is_inplace(op, op.get_op())
+]
+_gradgrad_ops = [op for op in _autograd_ops if op.supports_gradgrad]
+
+
 vjp_fail = {
     xfail("tensor_split"),  # data_ptr composite compliance
     # Very minor accuracy issue on ROCm
@@ -446,7 +456,7 @@ class TestOperatorsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(_outplace_autograd_ops, allowed_dtypes=(torch.float,))
     @skipOps(
         vjp_fail.union(
             {
@@ -540,19 +550,7 @@ class TestOperatorsDevice(TestCase):
         ),
     )
     def test_grad(self, device, dtype, op):
-        if op.name in vjp_fail:
-            self.skipTest("Skipped; Expected failures")
-            return
-
-        if not op.supports_autograd:
-            self.skipTest("Skipped! Autograd not supported.")
-            return
-
         samples = op.sample_inputs(device, dtype, requires_grad=True)
-
-        if is_inplace(op, op.get_op()):
-            self.skipTest("Skipped for redundancy. test_vjp handles in-place testing.")
-            return
 
         for sample in samples:
             args = [sample.input] + list(sample.args)
@@ -595,7 +593,7 @@ class TestOperatorsDevice(TestCase):
                 self.assertEqual(result_noncontig, expected)
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(_forward_ad_ops, allowed_dtypes=(torch.float,))
     @skipOps(
         set(
             {
@@ -692,10 +690,6 @@ class TestOperatorsDevice(TestCase):
         ),
     )
     def test_jvp(self, device, dtype, op):
-        if not op.supports_forward_ad:
-            self.skipTest("Skipped! Forward AD not supported.")
-            return
-
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         outplace_variant = op if not is_inplace(op, op.get_op()) else None
@@ -778,7 +772,7 @@ class TestOperatorsDevice(TestCase):
             self.assertEqual(noncontig_tangent_outs, expected_tangent_outs)
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(_autograd_ops, allowed_dtypes=(torch.float,))
     @skipOps(
         vjp_fail.union(
             {
@@ -834,10 +828,6 @@ class TestOperatorsDevice(TestCase):
         ),
     )
     def test_vjp(self, device, dtype, op):
-        if not op.supports_autograd:
-            self.skipTest("Skipped! Autograd not supported.")
-            return
-
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         def _test(_op, inplace=False):
@@ -881,7 +871,7 @@ class TestOperatorsDevice(TestCase):
 
             _test(f, inplace=True)
 
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(_gradgrad_ops, allowed_dtypes=(torch.float,))
     @skipOps(
         vjp_fail.union(
             {
@@ -921,13 +911,6 @@ class TestOperatorsDevice(TestCase):
         ),
     )
     def test_vjpvjp(self, device, dtype, op):
-        if not op.supports_autograd:
-            self.skipTest("Skipped! Autograd not supported.")
-            return
-        if not op.supports_gradgrad:
-            self.skipTest("Skipped! Operation does not support gradgrad")
-            return
-
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         def test(_op, inplace=False):
@@ -987,7 +970,8 @@ class TestOperatorsDevice(TestCase):
                 # (3) encountering this error in PyTorch internals.
                 xfail("index_reduce", "prod"),
                 decorate(
-                    "linalg.householder_product", decorator=runOnRocm
+                    "linalg.householder_product",
+                    decorator=runOnRocm,
                 ),  # works on ROCm
                 # nans
                 xfail("masked.softmax", device_type="cpu"),
@@ -1068,7 +1052,10 @@ class TestOperatorsDevice(TestCase):
             }
         ),
     )
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(
+        [op for op in _gradgrad_ops if not is_inplace(op, op.get_op())],
+        allowed_dtypes=(torch.float,),
+    )
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride(
         "TestOperatorsDevice",
@@ -1106,19 +1093,7 @@ class TestOperatorsDevice(TestCase):
         # Since, we test `vjpvjp` independently,
         # for this test, we just verify that vmap
         # of `vjpvjp` is correct.
-        if not op.supports_autograd:
-            self.skipTest("Skipped! Autograd not supported.")
-            return
-        if not op.supports_gradgrad:
-            self.skipTest("Skipped! Operation does not support gradgrad")
-            return
-
         samples = op.sample_inputs(device, dtype, requires_grad=True)
-
-        # TODO: test in-place
-        if is_inplace(op, op.get_op()):
-            self.skipTest("Skipped! NYI: inplace-testing not supported.")
-            return
 
         for sample in samples:
             fn, args = get_vjpfull_variant(op, sample)
@@ -1215,7 +1190,7 @@ class TestOperatorsDevice(TestCase):
     )
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(_outplace_autograd_ops, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride(
         "TestOperatorsDevice",
@@ -1271,16 +1246,8 @@ class TestOperatorsDevice(TestCase):
         ),
     )
     def test_vmapvjp(self, device, dtype, op):
-        if not op.supports_autograd:
-            self.skipTest("Skipped! Autograd not supported.")
-            return
-
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
-        # TODO: test in-place
-        if is_inplace(op, op.get_op()):
-            self.skipTest("Skipped! NYI: inplace-testing not supported.")
-            return
         for sample in samples:
             cotangents = get_sample_cotangents(op, sample)
             fn, args = get_vjp_fn_and_args_with_cotangents(op, sample, cotangents)
@@ -1361,7 +1328,7 @@ class TestOperatorsDevice(TestCase):
     }
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(_outplace_forward_ad_ops, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride(
         "TestOperatorsDevice",
@@ -1393,16 +1360,7 @@ class TestOperatorsDevice(TestCase):
     # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
     # because that corresponds to "batched forward-mode AD" testing in PyTorch core
     def test_vmapjvpall(self, device, dtype, op):
-        if is_inplace(op, op.get_op()):
-            # TODO: test in-place
-            self.skipTest("Skipped! NYI: inplace-testing not supported.")
-            return
-
         samples = op.sample_inputs(device, dtype, requires_grad=False)
-
-        if not op.supports_forward_ad:
-            self.skipTest("Skipped! Forward AD not supported.")
-            return
 
         for sample in samples:
             kwarg_values = sample.kwargs
@@ -1414,7 +1372,7 @@ class TestOperatorsDevice(TestCase):
             for loop_out, batched_out in generator:
                 self.assertEqual(loop_out, batched_out)
 
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(_outplace_forward_ad_ops, allowed_dtypes=(torch.float,))
     @skipOps(
         vmapjvpall_fail.union(
             {
@@ -1452,16 +1410,7 @@ class TestOperatorsDevice(TestCase):
     )
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
-        if is_inplace(op, op.get_op()):
-            # TODO: test in-place
-            self.skipTest("Skipped! NYI: inplace-testing not supported.")
-            return
-
         samples = op.sample_inputs(device, dtype, requires_grad=False)
-
-        if not op.supports_forward_ad:
-            self.skipTest("Skipped! Forward AD not supported.")
-            return
 
         def test():
             for sample in samples:
@@ -1481,7 +1430,7 @@ class TestOperatorsDevice(TestCase):
 
         check_vmap_fallback(self, test, op, dry_run=False)
 
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(_outplace_autograd_ops, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps(
         vmapvjp_fail.union(
@@ -1570,16 +1519,7 @@ class TestOperatorsDevice(TestCase):
         ),
     )
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
-        if not op.supports_autograd:
-            self.skipTest("Skipped! Autograd not supported.")
-            return
-
         samples = op.sample_inputs(device, dtype, requires_grad=True)
-
-        # TODO: test in-place
-        if is_inplace(op, op.get_op()):
-            self.skipTest("Skipped! NYI: inplace-testing not supported.")
-            return
 
         def test():
             for sample in samples:
@@ -1611,7 +1551,10 @@ class TestOperatorsDevice(TestCase):
 
         check_vmap_fallback(self, test, op, dry_run=False)
 
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(
+        [op for op in _outplace_autograd_ops if op.name != "nn.functional.dropout"],
+        allowed_dtypes=(torch.float,),
+    )
     @skipOps(
         vjp_fail.union(
             {
@@ -1679,21 +1622,6 @@ class TestOperatorsDevice(TestCase):
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
         # certainly redundant with the vmap_has_batch_rule test in test_vmap.py
-
-        # one-off skip
-        if op.name == "nn.functional.dropout":
-            self.skipTest("Skipped!")
-
-        if not op.supports_autograd:
-            # If the op doesn't support autograd, vmap(op) won't either
-            self.skipTest("Skipped! Autograd not supported.")
-            return
-
-        # TODO: test in-place
-        if is_inplace(op, op.get_op()):
-            self.skipTest("Skipped! NYI: inplace-testing not supported.")
-            return
-
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         batch_norm_fns = (
             "nn.functional.batch_norm",
@@ -1751,7 +1679,7 @@ class TestOperatorsDevice(TestCase):
         else:
             self.assertEqual(jacobian_jvp, jacobian_vjp)
 
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(_outplace_autograd_ops, allowed_dtypes=(torch.float,))
     @skipOps(
         vjp_fail.union(
             {
@@ -1859,16 +1787,7 @@ class TestOperatorsDevice(TestCase):
         ),
     )
     def test_jvpvjp(self, device, dtype, op):
-        if not op.supports_autograd:
-            self.skipTest("Skipped! Autograd not supported.")
-            return
-
         samples = op.sample_inputs(device, dtype, requires_grad=True)
-
-        # TODO: test in-place
-        if is_inplace(op, op.get_op()):
-            self.skipTest("Skipped! NYI: inplace-testing not supported.")
-            return
 
         for sample in samples:
             fn, primals = normalize_op_input_output(op, sample)
@@ -2081,7 +2000,7 @@ class TestOperatorsDevice(TestCase):
             }
         ),
     )
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(_outplace_autograd_ops, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride(
         "TestOperatorsDevice",
@@ -2122,16 +2041,7 @@ class TestOperatorsDevice(TestCase):
         # Since we test `jvpvjp` separately,
         # in this we just check that vmap of `jvpvjp`
         # is correct.
-        if not op.supports_autograd:
-            self.skipTest("Skipped! Autograd not supported.")
-            return
-
         samples = op.sample_inputs(device, dtype, requires_grad=True)
-
-        # TODO: test in-place
-        if is_inplace(op, op.get_op()):
-            self.skipTest("Skipped! NYI: inplace-testing not supported.")
-            return
 
         for sample in samples:
             fn, primals = normalize_op_input_output(op, sample)
@@ -2377,7 +2287,7 @@ class TestOperatorsDevice(TestCase):
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(
-        op_db + additional_op_db + autograd_function_db,
+        _autograd_ops,
         allowed_dtypes=(torch.float32, torch.double),
     )
     @skipOps(
@@ -2474,10 +2384,6 @@ class TestOperatorsDevice(TestCase):
         def filter_none(out):
             flattened = pytree.tree_leaves(out)
             return tuple(o for o in flattened if o is not None)
-
-        if not op.supports_autograd:
-            self.skipTest("Skipped! Autograd not supported.")
-            return
 
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=True)
 

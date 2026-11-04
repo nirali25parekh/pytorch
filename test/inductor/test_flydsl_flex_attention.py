@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import operator
+import unittest
 from types import SimpleNamespace
 from unittest import mock
 
@@ -254,12 +255,11 @@ def _make_qkv(
     )
 
 
+@unittest.skipIf(not _has_gfx950_flydsl(), "requires gfx950 and a built FlyDSL runtime")
 class TestFlyDSLFlexAttentionBackend(TestCase):
     @parametrize("qk_dim", [128, 192])
     @parametrize("partial", [False, True])
     def test_split_kv_reduction(self, device, qk_dim, partial):
-        if not _has_gfx950_flydsl():
-            self.skipTest("requires gfx950 and a built FlyDSL runtime")
         query, key, value = _make_qkv(
             device=device,
             q_heads=4,
@@ -329,8 +329,6 @@ class TestFlyDSLFlexAttentionBackend(TestCase):
     @parametrize("seq_q", [1, 256])
     @torch._inductor.config.patch({"fx_graph_cache": False})
     def test_dense_default_uses_isolated_backend(self, device, seq_q):
-        if not _has_gfx950_flydsl():
-            self.skipTest("requires gfx950 and a built FlyDSL runtime")
         query, key, value = _make_qkv(device=device, seq_q=seq_q, seq_kv=256)
         compiled = torch.compile(
             lambda q, k, v: flex_attention(
@@ -358,8 +356,6 @@ class TestFlyDSLFlexAttentionBackend(TestCase):
 
     @torch._inductor.config.patch({"fx_graph_cache": False})
     def test_computed_mask_capture(self, device):
-        if not _has_gfx950_flydsl():
-            self.skipTest("requires gfx950 and a built FlyDSL runtime")
         query, key, value = _make_qkv(device=device)
         ends = torch.arange(256, device=device, dtype=torch.int32)
         counts = torch.full((1, 1, 2), 2, device=device, dtype=torch.int32)
@@ -599,10 +595,6 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
 
 
 class _FlyDSLFlexAttentionRuntimeMixin:
-    def _require_runtime(self):
-        if not _has_gfx950_flydsl():
-            self.skipTest("requires gfx950 and a built FlyDSL runtime")
-
     def _compare_forward(
         self,
         query,
@@ -1010,6 +1002,7 @@ class TestFlyDSLFlexAttentionLowering(TestCase):
         self.assertIsNotNone(kwargs, reason)
 
 
+@unittest.skipIf(not _has_gfx950_flydsl(), "requires gfx950 and a built FlyDSL runtime")
 class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
     @parametrize(
         "qk_dim,mask_kind,dq_accum_fp32",
@@ -1021,7 +1014,6 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
     )
     @torch._inductor.config.patch({"fx_graph_cache": False})
     def test_gfx950_backward(self, device, qk_dim, mask_kind, dq_accum_fp32):
-        self._require_runtime()
         query, key, value = _make_qkv(device=device, qk_dim=qk_dim, seed=23)
         block_mask = None
         if mask_kind != "dense":
@@ -1055,7 +1047,6 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
     @parametrize("qk_dim", (128, 192))
     @torch._inductor.config.patch({"fx_graph_cache": False})
     def test_long_causal_dq_matches_fp64(self, device, qk_dim):
-        self._require_runtime()
         sequence_length = 16384
         # Multiple KV owners contribute to each private dQ partition.
         query, key, value = _make_qkv(
@@ -1126,7 +1117,6 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
     @parametrize("query_length", (4, 256))
     @torch._inductor.config.patch({"fx_graph_cache": False})
     def test_gqa_backward_falls_back_to_triton(self, device, query_length):
-        self._require_runtime()
         query, key, value = _make_qkv(
             device=device,
             q_heads=4,
@@ -1182,7 +1172,6 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
 
     @torch._inductor.config.patch({"fx_graph_cache": False})
     def test_lse_aux_backward_falls_back_to_triton(self, device):
-        self._require_runtime()
         query, key, value = _make_qkv(device=device, seed=44)
         grad_output = torch.randn_like(value)
         grad_lse = torch.randn(query.shape[:3], device=device, dtype=torch.float32)
@@ -1231,7 +1220,6 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
     @parametrize("qk_dim", (128, 192))
     @torch._inductor.config.patch({"fx_graph_cache": False})
     def test_strided_sliding_window_backward(self, device, qk_dim):
-        self._require_runtime()
         query, key, value = _make_qkv(
             device=device,
             batch=2,
@@ -1260,7 +1248,6 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
 
     @torch._inductor.config.patch({"fx_graph_cache": False})
     def test_gfx950_backward_respects_block_mask_metadata(self, device):
-        self._require_runtime()
         query, key, value = _make_qkv(device=device, seed=25)
         kv_num_blocks = torch.tensor([[[0, 1]]], device=device, dtype=torch.int32)
         kv_indices = torch.tensor([[[[0], [1]]]], device=device, dtype=torch.int32)
@@ -1300,8 +1287,6 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
     def test_gfx950_forward_full_partial_gqa_and_empty_q_block(
         self, device, q_heads, kv_heads, seq, captured
     ):
-        self._require_runtime()
-
         head_dim = 192 if captured else 128
         query, key, value = _make_qkv(
             device=device,
@@ -1366,7 +1351,6 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
     def test_gfx950_forward_unequal_packed_documents(
         self, device, seq, document_starts
     ):
-        self._require_runtime()
         starts = torch.tensor(document_starts, device=device, dtype=torch.int32)
         document_ids = torch.bucketize(
             torch.arange(seq, device=device), starts[1:], right=True
@@ -1388,7 +1372,6 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
 
     @parametrize("seq_q", [1, 3, 4, 8, 16])
     def test_gfx950_public_api_per_kv_head_decode(self, device, seq_q):
-        self._require_runtime()
         batch, q_heads, kv_heads = 1, 64, 4
         seq_kv, head_dim = 8192, 128
         query, key, value = _make_qkv(
@@ -1473,8 +1456,6 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
         )
 
     def test_gfx950_public_api_transposed_document_qk192_v128(self, device):
-        self._require_runtime()
-
         batch, heads, seq = 2, 2, 256
         qk_head_dim, v_head_dim = 192, 128
         document_end = torch.tensor(
@@ -1563,12 +1544,10 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
         ],
     )
     def test_gfx950_public_api_supported_masks(self, device, mask_mod, kwargs):
-        self._require_runtime()
         self._compare_created_mask(mask_mod, device=device, **kwargs)
 
     @parametrize("seq", [128, 512])
     def test_gfx950_public_api_composed_document_mask(self, device, seq):
-        self._require_runtime()
         document_ids = torch.arange(seq, device=device, dtype=torch.int32) // (seq // 2)
         document_starts = torch.tensor([0, seq // 2], device=device, dtype=torch.int32)
         document_causal = and_masks(
@@ -1580,8 +1559,6 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
         )
 
     def test_gfx950_public_api_sliding_window_mask_lowering(self, device):
-        self._require_runtime()
-
         from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils import (
             is_sliding_window_mask_program,
         )
@@ -1628,8 +1605,6 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
         check_match(lambda b, h, q, kv: q >= kv, False)
 
     def test_gfx950_auto_keeps_flydsl_opt_in(self, device):
-        self._require_runtime()
-
         query, key, value = _make_qkv(device=device, seed=6)
 
         def causal(b, h, q_idx, kv_idx):

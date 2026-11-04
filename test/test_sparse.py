@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import HardwareClassification, TestCas
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, skipIfMPS, \
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
-    skipIfCrossRef, set_warn_always_context
+    skipIfCrossRef, set_warn_always_context, decorateIf
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
@@ -1952,9 +1952,11 @@ class TestSparse(TestSparseBase):
     @precisionOverride({torch.bfloat16: 5e-2, torch.float16: 5e-2})
     @dtypes(torch.double, torch.cdouble, torch.bfloat16, torch.float16)
     @dtypesIfMPS(torch.float32, torch.complex64, torch.bfloat16, torch.float16)
+    @decorateIf(
+        unittest.skip('addmm_sparse_cuda is not implemented for BFloat16 and Half'),
+        lambda p: (p['dtype'] is torch.bfloat16 or p['dtype'] is torch.float16) and p['device'].startswith('cuda'),
+    )
     def test_sparse_addmm(self, device, dtype, coalesced):
-        if (dtype is torch.bfloat16 or dtype is torch.float16) and device.startswith("cuda"):
-            self.skipTest('addmm_sparse_cuda is not implemented for BFloat16 and Half')
 
 
         def test_shape(m, n, p, nnz, broadcast, alpha_beta=None):
@@ -3449,9 +3451,11 @@ class TestSparse(TestSparseBase):
     @skipIfMPS
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @parametrize('requires_grad', (True, False))
+    @decorateIf(
+        unittest.skip('requires_grad=True requires a floating point or complex dtype'),
+        lambda p: p['requires_grad'] and (not (p['dtype'].is_floating_point or p['dtype'].is_complex)),
+    )
     def test_empty_full(self, device, dtype, requires_grad):
-        if requires_grad and not (dtype.is_floating_point or dtype.is_complex):
-            self.skipTest(f'requires_grad==True requires float or complex dtype, got {dtype}')
 
         self._test_empty_full("cpu", dtype, requires_grad)
         self._test_empty_full(None, dtype, requires_grad)
@@ -4484,10 +4488,8 @@ class TestSparseUnaryUfuncs(TestCase):
         self.assertEqual(_sparse_to_dense(output), expected)
 
     @_sparse_unary_ops
+    @decorateIf(unittest.skip("Skipped! Out not supported"), lambda p: not p["op"].supports_out)
     def test_out(self, device, dtype, op):
-        if not op.supports_out:
-            self.skipTest("Skipped! Out not supported")
-
         sample = first_sample(self, op.sample_inputs(device, dtype))
         sample.input = sample.input.to_sparse()
         expect = op(sample.input, *sample.args, **sample.kwargs)
@@ -4498,10 +4500,8 @@ class TestSparseUnaryUfuncs(TestCase):
         self.assertEqual(out, expect)
 
     @_sparse_unary_ops
+    @decorateIf(unittest.skip("Skipped! Out not supported"), lambda p: p["op"].inplace_variant is None)
     def test_inplace(self, device, dtype, op):
-        if op.inplace_variant is None:
-            self.skipTest("Skipped! Out not supported")
-
         sample = first_sample(self, op.sample_inputs(device, dtype))
         sample.input = sample.input.to_sparse().coalesce()
         expect = op(sample.input, *sample.args, **sample.kwargs)
@@ -4536,12 +4536,9 @@ class TestSparseUnaryUfuncs(TestCase):
         actual = op(sparse_input)
         self.assertEqual(expect, _sparse_to_dense(actual))
 
-    @ops(sparse_unary_ufuncs, dtypes=OpDTypes.supported,
+    @ops([op for op in sparse_unary_ufuncs if op.supports_autograd], dtypes=OpDTypes.supported,
          allowed_dtypes=[torch.double, torch.cdouble])
     def test_sparse_fn_grad(self, device, dtype, op):
-        if not op.supports_autograd:
-            self.skipTest("Skipped! Op doesn't support autograd")
-
         for sample in op.sample_inputs(device, dtype):
             sparse_input = sample.input.to_sparse().detach().requires_grad_(True)
 
@@ -5279,7 +5276,7 @@ class TestSparseAny(TestCase):
                         r"sparse_compressed_to_sparse_(csr|csc|bsr|bsc): expected\s*(Sparse(Csc|Csr)[,]|)\s*Sparse(Csr|Bsr)"
                         " or Sparse(Csc|Bsc) layout but got Sparse(Csr|Csc|Bsr|Bsc)"):
                     explicit_to_sparse(t)
-                self.skipTest('NOT IMPL')
+                continue
             else:
                 r = t.to_sparse(layout=to_layout, blocksize=blocksize)
 
@@ -5485,7 +5482,7 @@ class TestSparseAny(TestCase):
                     RuntimeError,
                     r"addmm: computation on (CPU|CUDA) is not implemented for Strided \+ Sparse(Bsr|Bsc) @ Strided"):
                 torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
-            self.skipTest('NOT IMPL')
+            return
         elif layout in {torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc} and masked:
             with self.assertRaisesRegex(
                     RuntimeError,
@@ -5494,7 +5491,7 @@ class TestSparseAny(TestCase):
                     r"|addmm: computation on (CPU|CUDA) is not implemented for "
                     r"Strided \+ Sparse(Csc|Bsr|Bsc) @ Strided without MKL)"):
                 torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
-            self.skipTest('NOT IMPL')
+            return
         else:
             torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
 
@@ -5502,9 +5499,11 @@ class TestSparseAny(TestCase):
     @suppress_warnings
     @ops(binary_ufuncs_with_sparse_support)
     @all_sparse_layouts('layout', include_strided=False)
+    @decorateIf(
+        unittest.skip('OpInfo does not support this sparse layout'),
+        lambda p: not p['op'].supports_sparse_layout(p['layout']),
+    )
     def test_binary_operation(self, layout, device, dtype, op):
-        if not op.supports_sparse_layout(layout):
-            self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
 
         for sample in op.sample_inputs_sparse(layout, device, dtype):
             if validate_sample_input_sparse(op, sample, check_validate=False) is not sample:

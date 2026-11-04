@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import unittest
 from dataclasses import FrozenInstanceError
 
 import torch
@@ -42,6 +43,7 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         graph.output(())
         return torch.fx.GraphModule({}, graph)
 
+    @unittest.skipIf(not IS_BIG_GPU, "requires a GPU with Triton GEMM template support")
     @requires_gpu_and_triton
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     @torch._inductor.config.patch(
@@ -60,9 +62,6 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         self, parent_max_autotune, nested_max_autotune
     ):
         """Check GEMM backend selection in both forward and backward code."""
-        if not IS_BIG_GPU:
-            self.skipTest("requires a GPU with Triton GEMM template support")
-
         nested_config = get_invoke_subgraph_compile_options(
             fw_inductor_config_patches={"max_autotune": nested_max_autotune},
             bw_inductor_config_patches={"max_autotune": nested_max_autotune},

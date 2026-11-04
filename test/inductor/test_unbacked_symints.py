@@ -22,7 +22,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipGPUIf,
 )
-from torch.testing._internal.common_utils import parametrize, skipIfXpu
+from torch.testing._internal.common_utils import decorateIf, parametrize, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
@@ -181,12 +181,13 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @decorateIf(
+        unittest.skip("Triton kernel requires GPU"),
+        lambda params: params["device"] == "cpu",
+    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_kernel_grid(self, device):
-        if device == "cpu":
-            raise unittest.SkipTest("Triton kernel requires GPU")
-
         from torch.testing._internal.triton_utils import add_kernel
 
         def fn(x):
@@ -574,15 +575,14 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @decorateIf(
+        unittest.skip("scaled_dot_product_flash_attention has no CPU backend"),
+        lambda params: params["device"] == "cpu",
+    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdpfa(self, device):
-        if device == "cpu":
-            raise unittest.SkipTest(
-                "scaled_dot_product_flash_attention has no CPU backend"
-            )
-
         def fn(x):
             B, H, d_h = 2, 4, 8
             nz = torch.nonzero(x)
@@ -600,13 +600,14 @@ class TestUnbackedSymints(InductorTestCase):
         x = torch.tensor([1.0, 0.0, 1.0, 0.0], device=device)
         torch.compile(fn, fullgraph=True)(x)
 
+    @decorateIf(
+        unittest.skip("scaled_dot_product_attention has no CPU backend"),
+        lambda params: params["device"] == "cpu",
+    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdfpa_unbacked_strides(self, device):
-        if device == "cpu":
-            raise unittest.SkipTest("scaled_dot_product_attention has no CPU backend")
-
         def fn(x, y):
             B, H, d_h = 2, 4, 16
             nz = torch.nonzero(x)
@@ -677,14 +678,14 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @decorateIf(
+        unittest.skip("Combo kernels must be for GPU."),
+        lambda params: params["device"] == "cpu",
+    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     @inductor_config.patch({"combo_kernels": True, "benchmark_combo_kernel": True})
     def test_combo_kernel_size_hint_failure(self, device):
-        # A size hint failure is "TypeError: Cannot convert symbols to int"
-        if device == "cpu":
-            raise unittest.SkipTest("Combo kernels must be for GPU.")
-
         def fn(x):
             nz = torch.nonzero(x)
             u0 = nz.size(0)
@@ -1193,10 +1194,11 @@ class TestUnbackedSymints(InductorTestCase):
             ):
                 self.assertFalse(layout.is_stride_ordered([1, 0]))
 
+    @decorateIf(
+        unittest.skip("wrapper codegen unit test only needs one device"),
+        lambda p: p["device"] != "cpu",
+    )
     def test_python_wrapper_binds_symbol_from_compound_input_expr(self, device):
-        if device != "cpu":
-            self.skipTest("wrapper codegen unit test only needs one device")
-
         from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 

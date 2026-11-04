@@ -53,6 +53,7 @@ from torch.testing._internal.common_device_type import (
 
 from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.common_utils import (
+    decorateIf,
     IS_WINDOWS,
     isRocmArchAnyOf,
     MI350_ARCH,
@@ -835,6 +836,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         ],
         name_fn=lambda test_case: test_case[0],
     )
+    @decorateIf(unittest.skip("MPS has no float8_e5m2"),
+                lambda p: "mps" in p["device"] and e5m2_type in p["test_case"][1:3])
     def test_float8_basics(self, device, test_case) -> None:
         _, x_dtype, y_dtype, out_dtype, size = test_case
         expect_e5m2_cuda_error = x_dtype == e5m2_type and y_dtype == e5m2_type
@@ -1182,12 +1185,13 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
     @parametrize("x_cm", [True, False])
     @parametrize("y_cm", [True, False])
+    @decorateIf(
+        unittest.skip('Unsupported layout on the architecture'),
+        lambda p: 'cuda' in p['device'] and (not torch.version.hip) and ((p['x_cm'], p['y_cm']) != (True, False)) and (torch.cuda.get_device_properties(0).major != 10),
+    )
     def test_scaled_mm_vs_emulated(self, base_dtype, x_cm, y_cm, device):
         # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN.
         # hipBLASLt takes every permutation for the tensorwise scaling used here.
-        non_tn = (x_cm, y_cm) != (True, False)
-        if "cuda" in device and not torch.version.hip and non_tn and torch.cuda.get_device_properties(0).major != 10:
-            raise unittest.SkipTest("Unsupported layout on the architecture")
         torch.manual_seed(42)
         input_dtype = e4m3_type
         output_dtype = base_dtype
@@ -1922,19 +1926,23 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         (128, 512, 256),
     ])
     @with_tf32_off
+    @decorateIf(
+        unittest.skip('hipblaslt rowwise _scaled_mm only supports BFloat16'),
+        lambda p: p['base_dtype'] is torch.float32 and torch.version.hip,
+    )
+    @decorateIf(
+        unittest.skip('hipblaslt rowwise _scaled_mm only supports BFloat16'),
+        lambda p: p['base_dtype'] is torch.float16 and torch.version.hip,
+    )
+    @decorateIf(
+        unittest.skip('Need sm90+ for row-wise fp8 w/ cuBLAS'),
+        lambda p: p['base_dtype'] is torch.float16 and torch.cuda.is_available() and (torch.cuda.get_device_capability() < (9, 0)),
+    )
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype, shapes, device):
         M, K, N = shapes
         # Fp32 out_dtype works on the cuBLAS row-wise path when available; otherwise
         # the CUTLASS row-wise fallback now covers the no-bias case.
-        if base_dtype is torch.float32:
-            if torch.version.hip:
-                raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
 
-        if base_dtype is torch.float16:
-            if torch.version.hip:
-                raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
-            if torch.cuda.is_available() and torch.cuda.get_device_capability() < (9, 0):
-                raise unittest.SkipTest("Need sm90+ for row-wise fp8 w/ cuBLAS")
 
         torch.manual_seed(42)
         input_dtype = e4m3_type
@@ -1993,14 +2001,18 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
     @parametrize("wrap_v2", [True, False])
     @with_tf32_off
+    @decorateIf(
+        unittest.skip('hipblaslt rowwise _scaled_mm only supports BFloat16'),
+        lambda p: torch.version.hip and p['output_dtype'] is not torch.bfloat16,
+    )
+    @decorateIf(
+        unittest.skip('MPS only implements _scaled_mm_v2'),
+        lambda p: 'mps' in p['device'] and (not p['wrap_v2']),
+    )
     def test_scaled_mm_row_wise_no_bias_output_dtypes(self, output_dtype, wrap_v2, device):
         # No-bias row-wise binds the output dtype directly; this covers bf16/fp16/fp32
         # through both public entry points. Backend routing may still choose cuBLAS or
         # the CUTLASS fallback depending on CUDA version / arch.
-        if torch.version.hip and output_dtype is not torch.bfloat16:
-            raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
-        if "mps" in device and not wrap_v2:
-            raise unittest.SkipTest("MPS only implements _scaled_mm_v2")
 
         M, K, N = 256, 512, 768
         torch.manual_seed(42)
@@ -2061,6 +2073,10 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         "data_random_calc_scales",
     ])
     @parametrize("scale_dtype", [torch.float32, torch.float8_e8m0fnu])
+    @decorateIf(
+        unittest.skip('e8m0fnu blockwise scales only supported on XPU'),
+        lambda p: p['scale_dtype'] == torch.float8_e8m0fnu and 'xpu' not in str(p['device']),
+    )
     def test_scaled_mm_block_wise_numerics(self, output_dtype, lhs_block, rhs_block, M, N, K, test_case, scale_dtype, device):
         """
         subsume test_scaled_mm_vs_emulated_block_wise for random inputs, random scales,
@@ -2089,8 +2105,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         torch.manual_seed(42)
 
         is_xpu = "xpu" in str(device)
-        if scale_dtype == torch.float8_e8m0fnu and not is_xpu:
-            self.skipTest("e8m0fnu blockwise scales only supported on XPU")
 
         def _adjust_lhs_scale(x_fp8, x_scales, lhs_block):
             M, K = x_fp8.shape
@@ -2303,12 +2317,14 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
     @parametrize("M,N,K", [(256, 128, 256), (256, 256, 128)])
     @parametrize("scale_dtype", [torch.float32, torch.float8_e8m0fnu])
+    @decorateIf(
+        unittest.skip('e8m0fnu blockwise scales only supported on XPU'),
+        lambda p: p['scale_dtype'] == torch.float8_e8m0fnu and 'xpu' not in str(p['device']),
+    )
     def test_scaled_mm_vs_emulated_block_wise_verify_small_shapes(
         self, output_dtype, lhs_block, rhs_block, M, N, K, scale_dtype, device
     ):
         is_xpu = "xpu" in str(device)
-        if scale_dtype == torch.float8_e8m0fnu and not is_xpu:
-            self.skipTest("e8m0fnu blockwise scales only supported on XPU")
 
         torch.manual_seed(42)
 
@@ -2429,9 +2445,11 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         (127, 96, 1024),
         (1025, 128, 96)
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
+    @decorateIf(
+        unittest.skip('NVFP4 numerics require Xe2+ on XPU'),
+        lambda p: 'xpu' in p['device'] and (not Xe2_Or_Later),
+    )
     def test_blockwise_nvfp4_with_global_scale(self, mkn, device) -> None:
-        if "xpu" in device and not Xe2_Or_Later:
-            raise unittest.SkipTest("NVFP4 numerics require Xe2+ on XPU")
         M, K, N = mkn
         BLOCK_SIZE = 16
         # Note: SQNR target from `test_blockwise_mxfp8_nvfp4_mxfp4_numerics` test
@@ -2507,41 +2525,54 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         (1025, 128, 96)
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
     @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
+    @decorateIf(
+        unittest.skip('nvfp4 not supported on ROCm, skipping'),
+        lambda p: torch.version.hip and p['recipe'] == 'nvfp4',
+    )
+    @decorateIf(
+        unittest.skip('fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping'),
+        lambda p: (p['recipe'] == 'nvfp4' or p['recipe'] == 'mxfp4') and p['fast_accum'],
+    )
+    @decorateIf(
+        unittest.skip('MXFP4 on CUDA only supported on B200/B300'),
+        lambda p: p['recipe'] == 'mxfp4' and IS_SM12X,
+    )
+    @decorateIf(
+        unittest.skip('fast_accum not supported on XPU, skipping'),
+        lambda p: 'xpu' in p['device'] and p['fast_accum'],
+    )
+    @decorateIf(
+        unittest.skip('NVFP4 numerics require Xe2+ on XPU'),
+        lambda p: 'xpu' in p['device'] and p['recipe'] == 'nvfp4' and (not Xe2_Or_Later),
+    )
+    @decorateIf(
+        unittest.skip('K must be divisible by 32 for nvfp4 cublas gemm, skipping'),
+        lambda p: p['recipe'] == 'nvfp4' and p['mkn'][1] % 32 != 0,
+    )
+    @decorateIf(
+        unittest.skip('M and N must be multiples of 16 and K must be a multiple of 128 for NO_SWIZZLE on ROCm, skipping'),
+        lambda p: torch.version.hip and p['recipe'] in ('mxfp8', 'mxfp4') and (not rocm_mx_swizzle(torch.float4_e2m1fn_x2 if p['recipe'] == 'mxfp4' else torch.float8_e4m3fn)) and (not (p['mkn'][0] % 16 == 0 and p['mkn'][1] % 128 == 0 and (p['mkn'][2] % 16 == 0))),
+    )
+    @decorateIf(
+        unittest.skip('K must be divisible by the scale block size'),
+        lambda p: p['mkn'][1] % (16 if p['recipe'] == 'nvfp4' else 32) != 0,
+    )
+    @decorateIf(
+        unittest.skip('this test is only defined for M == K == N, skipping'),
+        lambda p: p['test_case_name'] == 'a_eye_b_eye' and (not p['mkn'][0] == p['mkn'][1] == p['mkn'][2]),
+    )
     def test_blockwise_mxfp8_nvfp4_mxfp4_numerics(self, test_case_name, fast_accum, mkn, recipe, device) -> None:
-        if torch.version.hip and recipe == "nvfp4":
-            raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
-        if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
-            raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
-        if recipe == "mxfp4" and IS_SM12X:
-            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
-        if "xpu" in device:
-            if fast_accum:
-                raise unittest.SkipTest("fast_accum not supported on XPU, skipping")
-            if recipe == "nvfp4" and not Xe2_Or_Later:
-                raise unittest.SkipTest("NVFP4 numerics require Xe2+ on XPU")
         M, K, N = mkn
-        if recipe == "nvfp4" and K % 32 != 0:
-            raise unittest.SkipTest("K must be divisible by 32 for nvfp4 cublas gemm, skipping")
 
-        if torch.version.hip and recipe in ("mxfp8", "mxfp4"):
-            mat_dtype = torch.float4_e2m1fn_x2 if recipe == "mxfp4" else torch.float8_e4m3fn
-            # SWIZZLE_32_8 only requires K % 32, checked via BLOCK_SIZE below.
-            # NO_SWIZZLE requires M and N multiples of 16 and K a multiple of 128.
-            if not rocm_mx_swizzle(mat_dtype) and not (M % 16 == 0 and K % 128 == 0 and N % 16 == 0):
-                raise unittest.SkipTest("M and N must be multiples of 16 and K must be a multiple of 128 for NO_SWIZZLE on ROCm, skipping")
 
         fp4_scaling_dtype = torch.float8_e8m0fnu if recipe == "mxfp4" else torch.float8_e4m3fn
         BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
 
-        if K % BLOCK_SIZE != 0:
-            raise unittest.SkipTest(f"K ({K}) must be divisible by BLOCK_SIZE ({BLOCK_SIZE}), skipping")
 
         require_exact_match = True
         approx_match_sqnr_target = 22.0
 
         if test_case_name == "a_eye_b_eye":
-            if not ((M == K) and (M == N)):
-                raise unittest.SkipTest("this test is only defined for M == K == N, skipping")
             A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
             B_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
 
@@ -2679,8 +2710,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
                 B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=fp4_scaling_dtype)
 
         elif test_case_name == "data_random_scales_from_data":
-            if not K % BLOCK_SIZE == 0:
-                raise unittest.SkipTest(f"this test is only defined for K a multiple of {BLOCK_SIZE}, skipping")
             require_exact_match = False
             # random data, scales from data
             A_ref = torch.randn((M, K), device=device, dtype=torch.bfloat16) * 1000
@@ -2748,13 +2777,19 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
+    @decorateIf(
+        unittest.skip('Error messages test not supported on XPU, skipping'),
+        lambda p: 'xpu' in p['device'],
+    )
+    @decorateIf(
+        unittest.skip('nvfp4 not supported on ROCm, skipping'),
+        lambda p: p['recipe'] == 'nvfp4' and torch.version.hip,
+    )
+    @decorateIf(
+        unittest.skip('MXFP4 on CUDA only supported on B200/B300'),
+        lambda p: p['recipe'] == 'mxfp4' and IS_SM12X,
+    )
     def test_blockwise_mxfp8_nvfp4_mxfp4_error_messages(self, device, recipe) -> None:
-        if "xpu" in device:
-            raise unittest.SkipTest("Error messages test not supported on XPU, skipping")
-        if recipe == "nvfp4" and torch.version.hip:
-            raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
-        if recipe == "mxfp4" and IS_SM12X:
-            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
         M, K, N = (1024, 512, 2048)
         BLOCK_SIZE_K = 16 if recipe == "nvfp4" else 32
         BLOCK_SIZE_MN = 128
@@ -3050,11 +3085,15 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("recipe", ["nvfp4", "mxfp4"])
+    @decorateIf(
+        unittest.skip('nvfp4 not supported on ROCm, skipping'),
+        lambda p: p['recipe'] == 'nvfp4' and torch.version.hip,
+    )
+    @decorateIf(
+        unittest.skip('MXFP4 on CUDA only supported on B200/B300'),
+        lambda p: p['recipe'] == 'mxfp4' and IS_SM12X,
+    )
     def test_blockwise_nvfp4_mxfp4_compile(self, device, recipe) -> None:
-        if recipe == "nvfp4" and torch.version.hip:
-            raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
-        if recipe == "mxfp4" and IS_SM12X:
-            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
 
         M, K, N = 128, 128, 128
         BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
@@ -3623,10 +3662,9 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("wrap_v2", [True, False])
+    @unittest.skipIf(torch.version.hip, 'hipblaslt rowwise _scaled_mm only supports BFloat16')
     def test_scaled_mm_row_wise_fp32_out_with_bias_errors(self, wrap_v2, device):
         # fp32 output combined with a bias is not supported on the row-wise path.
-        if torch.version.hip:
-            raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
 
         M, K, N = 16, 32, 48
         input_dtype = e4m3_type

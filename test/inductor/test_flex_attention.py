@@ -78,6 +78,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (
+    decorateIf,
     IS_LINUX,
     isRocmArchAnyOf,
     MI200_ARCH,
@@ -5281,6 +5282,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         for eager, compiled in zip(eager_grads, compiled_grads):
             torch.testing.assert_close(eager, compiled, atol=9e-3, rtol=0)
 
+    @decorateIf(
+        unittest.skip("paged attention captures the page table; not supported on MPS"),
+        lambda params: params["mode"] == "paged_attention"
+        and _is_mps_device(params["device"]),
+    )
     @supported_platform
     @skip_on_cpu
     @common_utils.parametrize("mode", ["eager", "inductor", "paged_attention"])
@@ -5298,11 +5304,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("shape", [(2, 1, 128, 16), (4, 2, 64, 16)])
     def test_flex_attention_stride_ordering(self, device, mode, permute_order, shape):
         from torch._inductor.ir import get_stride_order
-
-        if mode == "paged_attention" and _is_mps_device(device):
-            self.skipTest(
-                "paged attention captures the page table; not supported on MPS"
-            )
 
         dtype = torch.float32
         # Setup
@@ -10621,6 +10622,24 @@ supports_learnable_bias = unittest.skipUnless(
 )
 
 
+def skip_rocm_flaky_learnable_bias_case(test_name):
+    return common_utils.decorateIf(
+        unittest.skip(
+            "Flaky on ROCm: https://github.com/pytorch/pytorch/issues/167271 and https://github.com/pytorch/pytorch/issues/167296"
+        ),
+        lambda p: TEST_WITH_ROCM
+        and (
+            p["params"].batch_size,
+            p["params"].num_heads,
+            p["params"].seq_length,
+            p["params"].head_dim,
+            p["params"].dtype,
+            p["mode"],
+        )
+        in ROCM_FLAKY_LEARNABLE_BIAS_CASES[test_name],
+    )
+
+
 @supports_learnable_bias
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestLearnableBiases(InductorTestCase):
@@ -10642,23 +10661,6 @@ class TestLearnableBiases(InductorTestCase):
             requires_grad=True,
         )
         return (make_tensor(), make_tensor(), make_tensor())
-
-    def skip_rocm_flaky_learnable_bias_case(
-        self, test_name: str, params: Params, mode: str
-    ):
-        """Skips parameterized ROCm flakes tracked by disabled-test issues."""
-        case = (
-            params.batch_size,
-            params.num_heads,
-            params.seq_length,
-            params.head_dim,
-            params.dtype,
-            mode,
-        )
-        if TEST_WITH_ROCM and case in ROCM_FLAKY_LEARNABLE_BIAS_CASES[test_name]:
-            self.skipTest(
-                "Flaky on ROCm: https://github.com/pytorch/pytorch/issues/167271 and https://github.com/pytorch/pytorch/issues/167296"
-            )
 
     @torch.no_grad()
     def _gold_check(self, eager, compiled, gold, tensor_name, fudge_factor=1.35):
@@ -10711,13 +10713,13 @@ class TestLearnableBiases(InductorTestCase):
         ):
             self._gold_check(eager, compiled, gold, name)
 
+    @skip_rocm_flaky_learnable_bias_case("relative_1d_bias")
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
     @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
     def test_relative_1d_bias(self, device, params, mode: str):
-        self.skip_rocm_flaky_learnable_bias_case("relative_1d_bias", params, mode)
         query, key, value = self._init_tensors(params, device=device)
         bias = torch.randn(
             2 * params.seq_length,
@@ -11029,13 +11031,13 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_rocm_flaky_learnable_bias_case("symmetric_bias")
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
     @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
     def test_symmetric_bias(self, device, params, mode: str):
-        self.skip_rocm_flaky_learnable_bias_case("symmetric_bias", params, mode)
         query, key, value = self._init_tensors(params, device=device)
         bias = torch.randn(
             params.seq_length,
@@ -11102,13 +11104,13 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_rocm_flaky_learnable_bias_case("head_specific_gate")
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
     @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
     def test_head_specific_gate(self, device, params, mode: str):
-        self.skip_rocm_flaky_learnable_bias_case("head_specific_gate", params, mode)
         query, key, value = self._init_tensors(params, device=device)
         gate_score = torch.randn(
             params.num_heads,

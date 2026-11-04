@@ -60,6 +60,7 @@ from torch.testing._internal.common_optimizers import (
     optims,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
@@ -1079,10 +1080,12 @@ class CompiledOptimizerTests(TestCase):
         for param, param_ref in zip(params, params_ref):
             self.assertEqual(param, param_ref)
 
+    @decorateIf(
+        unittest.skip("requires GPU"),
+        lambda params: params["device"] == GPU_TYPE and (not HAS_GPU),
+    )
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_capturable_does_not_leak_to_param_groups(self, device):
-        if device == GPU_TYPE and not HAS_GPU:
-            self.skipTest("requires GPU")
         m = torch.nn.Linear(2, 2, device=device)
         opt = AdamW(m.parameters(), lr=0.01)
         original_capturable = opt.param_groups[0]["capturable"]

@@ -32,6 +32,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model_gpu,
     copy_tests,
     skip_if_cpp_wrapper,
+    skip_if_device,
 )
 from torch._inductor import config
 from torch._inductor.ir import MultiTemplateBuffer
@@ -139,14 +140,12 @@ class BenchmarkFusionTestTemplate:
 
         self.common(f, (a, b))
 
+    @skip_if_device(lambda device: device != GPU_TYPE, "GPU only")
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
     @config.patch(max_autotune_gemm_backends="TRITON")
     def test_avoid_register_spilling(self):
-        if self.device != GPU_TYPE:
-            raise unittest.SkipTest("GPU only")
-
         from torch.nn.functional import gelu
 
         def foo(m, inp):

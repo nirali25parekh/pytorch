@@ -3,12 +3,13 @@
 import functools
 import queue
 import threading
-from unittest import skipIf as skipif, SkipTest
+from unittest import skipIf as skipif
 
 import pytest
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -315,6 +316,7 @@ class TestFFT1D(TestCase):
         "fft",
         [np.fft.fft, np.fft.fft2, np.fft.fftn, np.fft.ifft, np.fft.ifft2, np.fft.ifftn],
     )
+    @decorateIf(skip(reason="Fortran order arrays"), lambda p: p["order"] == "F")
     def test_fft_with_order(self, dtype, order, fft):
         # Check that FFT/IFFT produces identical results for C, Fortran and
         # non contiguous arrays
@@ -324,7 +326,6 @@ class TestFFT1D(TestCase):
         # See discussion in pull/14178
         _tol = float(8.0 * np.sqrt(np.log2(X.size)) * np.finfo(X.dtype).eps)
         if order == "F":
-            raise SkipTest("Fortran order arrays")
             Y = np.asfortranarray(X)
         else:
             # Make a non contiguous array

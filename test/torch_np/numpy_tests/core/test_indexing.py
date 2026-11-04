@@ -12,6 +12,7 @@ import pytest
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -474,14 +475,16 @@ class TestIndexing(TestCase):
     @parametrize("index", [True, False, np.array([0])])
     @parametrize("num", [32, 40])
     @parametrize("original_ndim", [1, 32])
+    @decorateIf(
+        skip(reason="torch does not limit dims to 32"),
+        lambda p: not (
+            isinstance(p["index"], np.ndarray) and p["original_ndim"] < p["num"]
+        ),
+    )
     def test_too_many_advanced_indices(self, index, num, original_ndim):
         # These are limitations based on the number of arguments we can process.
         # For `num=32` (and all boolean cases), the result is actually define;
         # but the use of NpyIter (NPY_MAXARGS) limits it for technical reasons.
-        if not (isinstance(index, np.ndarray) and original_ndim < num):
-            # unskipped cases fail because of assigning too many indices
-            raise SkipTest("torch does not limit dims to 32")
-
         arr = np.ones((1,) * original_ndim)
         with pytest.raises(IndexError):
             arr[(index,) * num]
@@ -492,12 +495,8 @@ class TestIndexing(TestCase):
         a = np.arange(25).reshape((5, 5))
         assert_equal(a[[0, 1]], np.array([a[0], a[1]]))
         assert_equal(a[[0, 1], [0, 1]], np.array([0, 6]))
-        raise SkipTest(
-            "torch happily consumes non-tuple sequences with multi-axis "
-            "indices (i.e. slices) as an index, whereas NumPy invalidates "
-            "them, assumedly to keep things simple. This invalidation "
-            "behaviour is just too niche to bother emulating."
-        )
+        # Torch accepts non-tuple sequences with multi-axis indices.
+        return
         assert_raises(IndexError, a.__getitem__, [slice(None)])
 
 
@@ -1200,10 +1199,8 @@ class TestArrayToIndexDeprecation(TestCase):
 
         assert_raises((TypeError, RuntimeError), np.take, a, [0], a)
 
-        raise SkipTest(
-            "Multi-dimensional tensors are indexable just as long as they only "
-            "contain a single element, no bother raising here"
-        )
+        # Torch accepts multi-dimensional tensors containing one element as indices.
+        return
         assert_raises(TypeError, operator.index, np.array([1]))
 
         raise SkipTest("torch consumes tensors as ints, no bother raising here")

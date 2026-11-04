@@ -456,13 +456,13 @@ class TestGpuWrapper(InductorTestCase):
             _, code = test_torchinductor.run_and_get_cpp_code(compiled, x, 3)
         self.assertIn("torch.tensor(arg, device='cpu')", code)
 
+    @unittest.skipIf(
+        not config.is_fbcode(), "fbcode-only cpp_wrapper symbol visibility test"
+    )
     @config.patch(implicit_fallbacks=True)
     def test_fbcode_custom_op_fallback_python_arg_helpers(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")
-        if not config.is_fbcode():
-            self.skipTest("fbcode-only cpp_wrapper symbol visibility test")
-
         device = self.device
         with torch.library._scoped_library(
             "fbcode_cpp_wrapper_arg_helpers", "FRAGMENT"
@@ -551,11 +551,9 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn("aoti_custom_ops::forward_maybe_weighted", code)
         self.assertIn("c10::IValue(at::Tensor())", code)
 
+    @unittest.skipIf(torch.version.hip is not None, "requires CUDA TMA helpers")
     @skipIfXpu(msg="tests CUDA TMA helper codegen")
     def test_tma_descriptor_separates_global_and_kernel_shapes(self):
-        if torch.version.hip is not None:
-            self.skipTest("requires CUDA TMA helpers")
-
         helpers = CUDADeviceOpOverrides().tma_descriptor_helpers()
         self.assertNotIn("int32_t* shape", helpers)
         self.assertIn("uint64_t* shape", helpers)
@@ -1258,11 +1256,12 @@ run()
 class TestLazyTmaGlobalScratch(InductorTestCase):
     device = GPU_TYPE
 
+    @unittest.skipIf(
+        GPU_TYPE not in ("cuda", "xpu") or torch.version.hip, "requires CUDA or XPU"
+    )
     def test_lazy_tma_global_scratch_scales_with_launch_grid(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")
-        if GPU_TYPE not in ("cuda", "xpu") or torch.version.hip:
-            self.skipTest("requires CUDA or XPU")
         if GPU_TYPE == "cuda" and torch.cuda.get_device_capability()[0] < 9:
             self.skipTest("requires Hopper or newer for TMA")
         if not has_triton_tensor_descriptor_host_tma():

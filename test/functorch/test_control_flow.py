@@ -4965,6 +4965,11 @@ class TestControlFlowDevice(_TestControlFlowBase):
         if autograd:
             self.check_autograd(result, result_exp, (init, xs, kv))
 
+    @decorateIf(
+        unittest.skip("init aliasing requires an AOT backend"),
+        lambda params: params["alias_site"] == "init"
+        and params["compile_mode"] in ("none", "eager"),
+    )
     @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("alias_site", ["init", "nested"])
@@ -4973,11 +4978,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
     def test_scan_input_input_alias_sites(
         self, device, alias_site, compile_mode, autograd
     ):
-        if alias_site == "init" and compile_mode in ("none", "eager"):
-            # Dynamo clones init, so an aliased carry initializer only reaches
-            # the check in functionalization, which needs an AOT backend.
-            self.skipTest("init aliasing requires an AOT backend")
-
         scan_fct = compile_mode_helper(scan, compile_mode)
         kv = torch.randn(4, 4, device=device, requires_grad=autograd)
         k, v = kv[:, :2], kv[:, 2:]
@@ -14256,6 +14256,12 @@ class TestControlFlowNNCUDA(TestCase):
 class TestControlFlowAndRNGCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
+    @decorateIf(
+        unittest.skip(
+            "randn() currently does not work with a generator argument in dynamo."
+        ),
+        lambda p: p["rng_func"] == "custom_generator",
+    )
     @parametrize("rng_func", ["custom_generator", "default_generator"])
     def test_rng_with_conditional_nodes_errors(self, rng_func):
         pred = torch.tensor(True, device="cuda")

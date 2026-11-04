@@ -46,6 +46,7 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTenso
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    decorateIf,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -1934,10 +1935,14 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         torch._dynamo.reset()
         PrecompileContext.clear()
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu"
+        and params["backend"] == "inductor"
+        and (not has_triton()),
+    )
     @parametrize("backend", ("eager", "inductor"))
     def test_basic_fn(self, device, backend):
-        if device != "cpu" and backend == "inductor" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -1974,10 +1979,14 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu"
+        and params["backend"] == "inductor"
+        and (not has_triton()),
+    )
     @parametrize("backend", ("eager", "inductor"))
     def test_lazy_backward(self, device, backend):
-        if device != "cpu" and backend == "inductor" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -2017,12 +2026,11 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu" and (not has_triton()),
+    )
     def test_install_survives_a_cold_bundled_autotune_cache(self, device):
-        # AutotuneCacheBundler keeps one bundle per compile context, left open
-        # on a remote-cache miss, and install() post-compiles both of the
-        # frame's variants in one.
-        if device != "cpu" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
         from torch._inductor.runtime.autotune_cache import (
             _AutotuneCacheBundlerImpl as Bundler,
         )
@@ -2063,10 +2071,14 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
                 for x in args:
                     self.assertEqual(compiled_fn(x), fn(x))
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu"
+        and params["backend"] == "inductor"
+        and (not has_triton()),
+    )
     @parametrize("backend", ("eager", "inductor"))
     def test_graph_break_bomb(self, device, backend):
-        if device != "cpu" and backend == "inductor" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
         ctx = DiskDynamoStore()
 
         def fn(x, l, r):
@@ -2123,10 +2135,14 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(torch.tensor(N), 0, N - 1)
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu"
+        and params["backend"] == "inductor"
+        and (not has_triton()),
+    )
     @parametrize("backend", ("eager", "inductor"))
     def test_dynamic_shape(self, device, backend):
-        if device != "cpu" and backend == "inductor" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -2169,10 +2185,11 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(*args2)
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu" and (not has_triton()),
+    )
     def test_dynamo_cache_manual_load(self, device):
-        if device != "cpu" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
-
         def fn(x):
             return x.sin() + x.cos()
 
@@ -2202,11 +2219,12 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             self.assertEqual(expected, [result1, result2])
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu" and (not has_triton()),
+    )
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_serialize(self, device):
-        if device != "cpu" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
-
         def fn(x):
             return x.sin() + x.cos()
 
@@ -2233,11 +2251,12 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             self.assertEqual(expected, [result1, result2])
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu" and (not has_triton()),
+    )
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_import_source_guard(self, device):
-        if device != "cpu" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
-
         # Warm-loading a guard state whose serialized sources include an
         # ImportSource must not raise. `pytree.tree_is_leaf` routes through
         # `get_pytree_SUPPORTED_NODES_source`, which builds an
@@ -2261,11 +2280,12 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             self.assertEqual(result, expected)
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu" and (not has_triton()),
+    )
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_recompiles(self, device):
-        if device != "cpu" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
-
         def fn(x):
             return x.sin() + x.cos()
 
@@ -2291,15 +2311,16 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         self.assertEqual(result2, expected2)
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu" and (not has_triton()),
+    )
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO or IS_LINUX,
         "https://github.com/pytorch/pytorch/issues/183810",
     )
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_graph_breaks(self, device):
-        if device != "cpu" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
-
         def fn(x, l, r):
             if l > r:
                 return x.sum()
@@ -2338,12 +2359,13 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             # Should have same number of frames as on cold start
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu" and (not has_triton()),
+    )
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/184832")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_lazy_backward(self, device):
-        if device != "cpu" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
-
         def fn(x):
             return x.sin() + x.cos()
 
@@ -2365,11 +2387,12 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
 
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu" and (not has_triton()),
+    )
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_graph_break_partial_backend(self, device):
-        if device != "cpu" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
-
         def fn(x):
             y = x.sin()
             torch._dynamo.graph_break()
@@ -2409,10 +2432,12 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         # One recompile on a new frame, so total_frames should increase by 1
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames + 1)
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu" and (not has_triton()),
+    )
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_call_function_from_resume(self, device):
-        if device != "cpu" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
         mod = torch.nn.Linear(2, 3, device=device)
 
         def foo(x, mod):
@@ -2434,11 +2459,12 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
 
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu" and (not has_triton()),
+    )
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_code_with_generator(self, device):
-        if device != "cpu" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
-
         def foo(set_of_x):
             if not all(isinstance(s, torch.Tensor) for s in set_of_x):
                 raise TypeError(
@@ -2452,11 +2478,12 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         compiled_fn(*args)
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu" and (not has_triton()),
+    )
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_graph_breaks_from_print_model_as_fn(self, device):
-        if device != "cpu" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
-
         def guard_filter_fn(guards):
             return [
                 guard.guard_type not in ("CLOSURE_MATCH", "FUNCTION_MATCH")
@@ -2498,11 +2525,12 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             compiled_fn(x)
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu" and (not has_triton()),
+    )
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self, device):
-        if device != "cpu" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
-
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2517,10 +2545,12 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         x = torch.randn(10, 10, device=device)
         compiled_fn(x)
 
+    @decorateIf(
+        unittest.skip("Requires Triton"),
+        lambda params: params["device"] != "cpu" and (not has_triton()),
+    )
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_classmethod_qualname(self, device):
-        if device != "cpu" and not has_triton():
-            raise unittest.SkipTest("Requires Triton")
         x = torch.rand(10, device=device)
         model = _tempNetForQualName()
         model.forward(x)

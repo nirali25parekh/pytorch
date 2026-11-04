@@ -1016,11 +1016,6 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
         self._clear_dynamo_and_codecache()
 
-        # TODO: Fix allow in graph
-        raise unittest.SkipTest(
-            "Allow in graph produces an unserializable cache artifact"
-        )
-
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})

@@ -2312,6 +2312,10 @@ class ScanTests(TestCase):
             autograd=autograd,
         )
 
+    @decorateIf(
+        unittest.skip("Fails due to issues with backward pass when compiled."),
+        lambda params: params["autograd"],
+    )
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
@@ -2324,12 +2328,6 @@ class ScanTests(TestCase):
     def test_scan_in_cond(
         self, device, dynamic, reverse, dim, pred, scan_length, autograd
     ):
-        # TODO: remove when https://github.com/pytorch/pytorch/issues/182381 is resolved.
-        if autograd:
-            raise unittest.SkipTest(
-                "Fails due to issues with backward pass when compiled."
-            )
-
         init = torch.randn(4, 4, 4, dtype=torch.float64)
         xs = torch.randn(scan_length, 4, 4, 4, dtype=torch.float64)
         xs = xs.movedim(0, dim)

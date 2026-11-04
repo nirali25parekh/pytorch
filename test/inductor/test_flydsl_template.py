@@ -477,6 +477,7 @@ class TestFlyDSLTemplate(TestCase):
                 b_is_transposed=b_is_transposed,
             )
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @parametrize(
@@ -492,8 +493,6 @@ class TestFlyDSLTemplate(TestCase):
     ):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
 
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
         if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
             self.skipTest("requires gfx950")
 
@@ -800,9 +799,8 @@ class TestFlyDSLTemplate(TestCase):
             self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "gfx942")
         self.assertEqual(seen, [True])
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     def test_flydsl_mxfp8_precompile_fake_tensors(self):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
         import flydsl.compiler as flyc
         import flydsl.expr as fx
         import jinja2
@@ -875,9 +873,8 @@ class TestFlyDSLTemplate(TestCase):
                 shapes, strides, dtypes, flydsl_gpu_arch="gfx950"
             )
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     def test_flydsl_mxfp8_wgrad_precompile_fake_tensors(self):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
         import flydsl.compiler as flyc
         import flydsl.expr as fx
 
@@ -916,11 +913,10 @@ class TestFlyDSLTemplate(TestCase):
                 shapes, strides, dtypes, flydsl_gpu_arch="gfx950"
             )
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     def test_flydsl_mxfp8_template_rejects_mismatched_scale_rows(self):
         """The lowering may serve a dynamic token dim without proving A and its
         scales agree, so the template checks it before launching."""
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
         import jinja2
 
         from torch._inductor.kernel.mm_common import load_kernel_template
@@ -1066,6 +1062,7 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(result, fn(a, b, offs), atol=3e-2, rtol=3e-2)
         return code
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @torch._inductor.config.patch(
@@ -1073,9 +1070,6 @@ class TestFlyDSLTemplate(TestCase):
         max_autotune_gemm_backends="FLYDSL",
     )
     def test_flydsl_gemm_transposed_rhs_e2e(self):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
-
         cases = (
             (torch.bfloat16, 32, 128, 128),
             (torch.float16, 32, 128, 128),
@@ -1096,6 +1090,7 @@ class TestFlyDSLTemplate(TestCase):
                 self.assertIn(".run(", code)
                 self.assertIn("TILE_M: fx.Constexpr", code)
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @parametrize(
@@ -1130,8 +1125,6 @@ class TestFlyDSLTemplate(TestCase):
     ):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
 
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
         if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
             self.skipTest("requires gfx950")
 
@@ -1181,6 +1174,7 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIn(f"A_IS_TRANSPOSED: fx.Constexpr = {a_is_transposed}", code)
         self.assertIn(f"B_IS_TRANSPOSED: fx.Constexpr = {b_is_transposed}", code)
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @torch._inductor.config.patch(
@@ -1189,9 +1183,6 @@ class TestFlyDSLTemplate(TestCase):
         flydsl_enable_autotuning=False,
     )
     def test_flydsl_gemm_strides_offsets_and_alignment(self):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
-
         m = n = 64
         k = 128
         dtype = torch.bfloat16
@@ -1221,6 +1212,7 @@ class TestFlyDSLTemplate(TestCase):
             self._assert_compiled_mm(a, bad_offset, expect_flydsl=False)
         self._assert_compiled_mm(*supported)
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @torch._inductor.config.patch(
@@ -1232,9 +1224,6 @@ class TestFlyDSLTemplate(TestCase):
     )
     def test_flydsl_autotune_transposed_rhs_uses_view_tensor(self):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
-
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
 
         configs = [
             asdict(config) for config in flydsl_heuristics.get_default_gemm_configs()
@@ -1366,6 +1355,7 @@ class TestFlyDSLTemplate(TestCase):
         )
         self.assertEqual(grid_size, expected)
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @parametrize("dtype", (torch.bfloat16, torch.float16))
@@ -1375,9 +1365,6 @@ class TestFlyDSLTemplate(TestCase):
         flydsl_enable_autotuning=False,
     )
     def test_flydsl_grouped_mm_grid_stride_e2e(self, dtype):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
-
         group_sizes = torch.tensor(
             [0, 1, 640, 0, 130, 3], device="cuda", dtype=torch.int32
         )
@@ -1393,6 +1380,7 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIn("FLYDSL_COMPILE_ONLY", code)
         self.assertIn("_precompile", code)
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @torch._inductor.config.patch(
@@ -1404,9 +1392,6 @@ class TestFlyDSLTemplate(TestCase):
     )
     def test_flydsl_grouped_mm_autotune_e2e(self):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
-
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
 
         configs = [
             asdict(config)
@@ -1439,6 +1424,7 @@ class TestFlyDSLTemplate(TestCase):
         ):
             self._assert_compiled_grouped_mm(a, b, offs)
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @torch._inductor.config.patch(
@@ -1449,9 +1435,6 @@ class TestFlyDSLTemplate(TestCase):
     )
     def test_flydsl_grouped_mm_kernel_paths_e2e(self):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
-
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
 
         config_fields = (
             "TILE_M",
@@ -1513,6 +1496,7 @@ class TestFlyDSLTemplate(TestCase):
                 for field, value in zip(config_fields, expected_values):
                     self.assertIn(f"{field}: fx.Constexpr = {value}", code)
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @parametrize("dtype", (torch.bfloat16, torch.float16))
@@ -1521,9 +1505,6 @@ class TestFlyDSLTemplate(TestCase):
         max_autotune_gemm_backends="ATEN,FLYDSL",
     )
     def test_flydsl_grouped_mm_fallback_e2e(self, dtype):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
-
         group_sizes = torch.tensor([32, 64], device="cuda", dtype=torch.int32)
         offs = group_sizes.cumsum(0).to(torch.int32)
         k = 128
@@ -1716,6 +1697,7 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIn({"BLOCK_R": 256, "BLOCK_C": 256}, exhaustive)
         self.assertIn({"BLOCK_R": 64, "BLOCK_C": 128}, exhaustive)
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     @parametrize(
         "k,n,g,block_r,block_c,expected",
         (
@@ -1737,9 +1719,6 @@ class TestFlyDSLTemplate(TestCase):
         self, k, n, g, block_r, block_c, expected
     ):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
-
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
 
         valid = flydsl_heuristics.is_mxfp8_grouped_gemm_config_valid_for_shape(
             n, k, g, {"BLOCK_R": block_r, "BLOCK_C": block_c}
@@ -1904,6 +1883,7 @@ class TestFlyDSLTemplate(TestCase):
         )
         return code
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     @parametrize(
         "group_sizes,k,n",
         (
@@ -1925,8 +1905,6 @@ class TestFlyDSLTemplate(TestCase):
         flydsl_enable_autotuning=False,
     )
     def test_flydsl_mxfp8_grouped_mm_e2e(self, group_sizes, k, n):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
         if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
             self.skipTest("requires gfx950")
 
@@ -1936,6 +1914,7 @@ class TestFlyDSLTemplate(TestCase):
         self.assertIn("precompile_flydsl", code)
         self.assertNotIn("FLYDSL_COMPILE_ONLY", code)
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @torch._inductor.config.patch(
@@ -1946,13 +1925,12 @@ class TestFlyDSLTemplate(TestCase):
     )
     def test_flydsl_mxfp8_grouped_mm_autotune_e2e(self):
         """Autotuning walks every tile the kernel implements, and each is correct."""
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
         if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
             self.skipTest("requires gfx950")
 
         self._assert_compiled_mxfp8_grouped_mm([512, 300, 700, 1000], 2048, 2048)
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     @parametrize("autotune", (False, True))
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
@@ -1963,8 +1941,6 @@ class TestFlyDSLTemplate(TestCase):
         """
         from torch._inductor.graph import GraphLowering
 
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
         if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
             self.skipTest("requires gfx950")
 
@@ -2006,6 +1982,7 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(len(codes), 2)
         self.assertIn("async_compile.flydsl", codes[1])
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     def test_flydsl_mxfp8_grouped_mm_tile_parity_e2e(self):
@@ -2021,8 +1998,6 @@ class TestFlyDSLTemplate(TestCase):
         """
         import importlib
 
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
         if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
             self.skipTest("requires gfx950")
         module = importlib.import_module(
@@ -2078,12 +2053,10 @@ class TestFlyDSLTemplate(TestCase):
             base[:rows].float(), reference[:rows].float(), atol=6e-2, rtol=6e-2
         )
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     def test_flydsl_mxfp8_grouped_mm_row_windows(self):
         """A token dim past the int32 operand limit is split, not truncated."""
         import importlib
-
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
 
         module = importlib.import_module(
             "torch._inductor.kernel.vendored_templates.flydsl.kernels."
@@ -2109,12 +2082,10 @@ class TestFlyDSLTemplate(TestCase):
             covered += rows
         self.assertEqual(covered, total_m)
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     def test_flydsl_mxfp8_grouped_mm_rejects_oversized_weight(self):
         """B is passed whole, so an (E, N, K) past int32 must fail validation."""
         import importlib
-
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
 
         module = importlib.import_module(
             "torch._inductor.kernel.vendored_templates.flydsl.kernels."
@@ -2131,12 +2102,10 @@ class TestFlyDSLTemplate(TestCase):
             module.make_mxfp8_grouped_gemm_param_and_validate(7168, 2048, 32, 256, 256)
         )
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     def test_flydsl_mxfp8_grouped_mm_tile_starvation_follows_cu_count(self):
         """The starvation threshold is the device's CU count, not a constant."""
         import importlib
-
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
 
         module = importlib.import_module(
             "torch._inductor.kernel.vendored_templates.flydsl.kernels."
@@ -2151,12 +2120,10 @@ class TestFlyDSLTemplate(TestCase):
         with mock.patch.object(module, "_current_device_cu_count", return_value=128):
             self.assertEqual(module.pick_tile(m, e, n), (256, 256))
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     def test_flydsl_mxfp8_grouped_mm_refuses_non_gfx950_target(self):
         """gfx942 has no MX support; compiling for it must fail loudly."""
         import importlib
-
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
 
         module = importlib.import_module(
             "torch._inductor.kernel.vendored_templates.flydsl.kernels."
@@ -2300,9 +2267,8 @@ class TestFlyDSLTemplate(TestCase):
             for operand in operands:
                 operand.freeze_layout_with_exact_strides.assert_not_called()
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     def test_flydsl_mxfp8_wgrad_launch_checks(self):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
         from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
             mxfp8_wgrad_gfx950 as module,
         )
@@ -2335,9 +2301,8 @@ class TestFlyDSLTemplate(TestCase):
                 )
             compile_.assert_not_called()
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     def test_flydsl_mxfp8_wgrad_template_rejects_mismatched_operands(self):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
         namespace = self._exec_mxfp8_wgrad_template()
         namespace["launch_mxfp8_wgrad_gfx950"] = launch = mock.Mock()
         n, k, m = 256, 384, 512
@@ -2370,10 +2335,8 @@ class TestFlyDSLTemplate(TestCase):
         namespace["kernel_main"](mat1, mat2, scale_a, scale_b, offs, output, stream=0)
         launch.assert_called_once()
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     def test_flydsl_mxfp8_wgrad_order(self):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
-
         from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
             make_mxfp8_wgrad_param,
         )
@@ -2533,9 +2496,8 @@ print("completed")
             self.assertNotEqual(proc.returncode, 0, f"offsets {bad} did not trap")
             self.assertNotIn("completed", proc.stdout)
 
+    @unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
     def _require_flydsl_gfx950(self):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
         if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
             self.skipTest("requires gfx950")
 
@@ -2633,11 +2595,13 @@ def _scaled_mm_mxfp(
     )
 
 
+@unittest.skipIf(
+    not torch.version.hip or not flydsl_utils.runtime_available(),
+    "requires ROCm and FlyDSL",
+)
 class TestFlyDSLHTIDevice(TestCase):
     def setUp(self):
         super().setUp()
-        if not torch.version.hip or not flydsl_utils.runtime_available():
-            self.skipTest("requires ROCm and FlyDSL")
         if torch.cuda.get_device_properties().gcnArchName.split(":")[0] != "gfx950":
             self.skipTest("requires gfx950")
         torch.manual_seed(2026)
@@ -2707,11 +2671,13 @@ class TestFlyDSLHTIDevice(TestCase):
 instantiate_device_type_tests(TestFlyDSLHTIDevice, globals(), only_for="cuda")
 
 
+@unittest.skipIf(
+    not torch.version.hip or not flydsl_utils.runtime_available(),
+    "requires ROCm and FlyDSL",
+)
 class TestFlyDSLMXFPDevice(TestCase):
     def setUp(self):
         super().setUp()
-        if not torch.version.hip or not flydsl_utils.runtime_available():
-            self.skipTest("requires ROCm and FlyDSL")
         if torch.cuda.get_device_properties().gcnArchName.split(":")[0] != "gfx950":
             self.skipTest("requires gfx950")
         torch.manual_seed(2026)

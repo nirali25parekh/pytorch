@@ -18,7 +18,7 @@ from copy import deepcopy
 from itertools import product
 from functools import partial
 from collections import OrderedDict
-from unittest import mock, SkipTest
+from unittest import mock
 
 import torch
 from torch import inf, nan
@@ -40,7 +40,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
-    TEST_WITH_TORCHDYNAMO, HardwareClassification
+    TEST_WITH_TORCHDYNAMO, HardwareClassification, decorateIf
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -6030,7 +6030,7 @@ def add_test(test, decorator=None, tf32_decorator=None):
     if not hasattr(test, 'test_cpu') or test.test_cpu:
         add(test_name, lambda self, test=test: test(self))
 
-    if torch.accelerator.is_available():
+    if torch.accelerator.is_available() and test.should_test_accelerator:
         device_type = torch.accelerator.current_accelerator(True).type
 
         # Only add XPU test in addition to CUDA test in this PR
@@ -9766,17 +9766,22 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @expectedFailureMPS  # double device type
     @onlyNativeDeviceTypes
+    @decorateIf(
+        unittest.skip('Lanczos mode is only supported on CPU'),
+        lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type != 'cpu',
+    )
+    @decorateIf(
+        unittest.skip('Lanczos mode requires antialias=True'),
+        lambda p: p['mode'] == 'lanczos' and (not p['antialias']),
+    )
+    @decorateIf(
+        unittest.skip('Lanczos mode does not support align_corners=True'),
+        lambda p: p['mode'] == 'lanczos' and p['align_corners'],
+    )
     def test_upsamplingBiMode2d(self, device, antialias, align_corners, mode, memory_format):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
 
-        if mode == "lanczos":
-            if torch.device(device).type != "cpu":
-                raise SkipTest("Lanczos mode is only supported on CPU")
-            if not antialias:
-                raise SkipTest("Lanczos mode requires antialias=True")
-            if align_corners:
-                raise SkipTest("Lanczos mode does not support align_corners=True")
 
         kwargs = dict(mode=mode, align_corners=align_corners, antialias=antialias)
         # test float scale factor up & downsampling
@@ -9844,22 +9849,28 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("dtype", integral_types() + floating_types())
     @skipIfMPS  # Error message is wrong for some dtypes
     @onlyNativeDeviceTypes
+    @decorateIf(
+        unittest.skip('Nearest mode does not have antialiasing'),
+        lambda p: 'nearest' in p['mode'] and p['antialias'],
+    )
+    @decorateIf(
+        unittest.skip('Lanczos mode is only supported on CPU'),
+        lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type != 'cpu',
+    )
+    @decorateIf(
+        unittest.skip('Lanczos mode requires antialias=True'),
+        lambda p: p['mode'] == 'lanczos' and (not p['antialias']),
+    )
     def test_upsamplingBiMode2d_nonsupported_dtypes(self, device, antialias, num_channels, mode, dtype):
         x = torch.ones(1, num_channels, 32, 32, dtype=dtype, device=device)
 
         should_raise_runtime_error = True
 
         if "nearest" in mode:
-            if antialias:
-                raise SkipTest("Nearest mode does not have antialiasing")
             if dtype in (torch.uint8, ) + floating_types():
                 should_raise_runtime_error = False
 
         elif mode == "lanczos":
-            if torch.device(device).type != "cpu":
-                raise SkipTest("Lanczos mode is only supported on CPU")
-            if not antialias:
-                raise SkipTest("Lanczos mode requires antialias=True")
             if dtype in floating_types() or (device == "cpu" and dtype == torch.uint8):
                 should_raise_runtime_error = False
 
@@ -9903,6 +9914,18 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("non_contig", [False, "sliced", "restrided"])
     @parametrize_test("batch_size", [1, 5])
     @skipIfMPS
+    @decorateIf(
+        unittest.skip('CUDA implementation is not yet supporting uint8'),
+        lambda p: torch.device(p['device']).type == 'cuda',
+    )
+    @decorateIf(
+        unittest.skip('Lanczos mode requires antialias=True'),
+        lambda p: p['mode'] == 'lanczos' and (not p['antialias']),
+    )
+    @decorateIf(
+        unittest.skip('Lanczos mode does not support align_corners=True'),
+        lambda p: p['mode'] == 'lanczos' and p['align_corners'],
+    )
     def test_upsamplingBiMode2d_consistency(
         self,
         device,
@@ -9917,14 +9940,7 @@ class TestNNDeviceType(NNTestCase):
         batch_size,
     ):
         # Check output value consistency between resized_input_uint8 and resized input_float
-        if torch.device(device).type == "cuda":
-            raise SkipTest("CUDA implementation is not yet supporting uint8")
 
-        if mode == "lanczos":
-            if not antialias:
-                raise SkipTest("Lanczos mode requires antialias=True")
-            if align_corners:
-                raise SkipTest("Lanczos mode does not support align_corners=True")
 
         torch.manual_seed(0)
 
@@ -9987,11 +10003,13 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("input_size, output_size", [(399, 437), (403, 377)])
+    @decorateIf(
+        unittest.skip('CUDA implementation is not yet supporting uint8'),
+        lambda p: torch.device(p['device']).type == 'cuda',
+    )
     def test_upsamplingBiLinear2d_consistency_interp_size_bug(self, device, memory_format, align_corners, input_size, output_size):
         # Non-regression test for https://github.com/pytorch/pytorch/pull/101403
 
-        if torch.device(device).type == "cuda":
-            raise SkipTest("CUDA implementation is not yet supporting uint8")
 
         mode = "bilinear"
         input_ui8 = torch.randint(0, 256, size=(1, 3, input_size, input_size), dtype=torch.uint8, device=device)
@@ -13439,11 +13457,15 @@ class TestNNDeviceType(NNTestCase):
                 _test(activation=activation, batch_first=batch_first, training=training)
 
     @parametrize_test('foreach', (False, True))
+    @decorateIf(
+        unittest.skip('foreach not supported on XLA'),
+        lambda p: torch.device(p['device']).type == 'xla' and p['foreach'],
+    )
+    @decorateIf(
+        unittest.skip('foreach not supported on MPS'),
+        lambda p: torch.device(p['device']).type == 'mps' and p['foreach'],
+    )
     def test_clip_grad_value(self, foreach, device):
-        if torch.device(device).type == 'xla' and foreach:
-            raise SkipTest('foreach not supported on XLA')
-        if torch.device(device).type == 'mps' and foreach:
-            raise SkipTest('foreach not supported on MPS')
 
         l = nn.Linear(10, 10).to(device)
         clip_value = 2.5
@@ -13492,11 +13514,15 @@ class TestNNDeviceType(NNTestCase):
 
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
+    @decorateIf(
+        unittest.skip('foreach not supported on XLA'),
+        lambda p: torch.device(p['device']).type == 'xla' and p['foreach'],
+    )
+    @decorateIf(
+        unittest.skip('foreach not supported on MPS'),
+        lambda p: torch.device(p['device']).type == 'mps' and p['foreach'],
+    )
     def test_clip_grad_norm(self, norm_type, foreach, device):
-        if torch.device(device).type == 'xla' and foreach:
-            raise SkipTest('foreach not supported on XLA')
-        if torch.device(device).type == 'mps' and foreach:
-            raise SkipTest('foreach not supported on MPS')
 
         l = nn.Linear(10, 10).to(device)
         max_norm = 2
@@ -14249,22 +14275,20 @@ class TestNNDeviceType(NNTestCase):
 
     @parametrize_test("bias", [False, True])
     @dtypes(torch.float32)
+    @decorateIf(
+        unittest.skip('input-grad ULP worst case exceeds tolerance on ROCm 7.14+ (bias=False, float32)'),
+        lambda p: TEST_WITH_ROCM and getRocmVersion() >= (7, 14) and (not p['bias']) and (p['dtype'] == torch.float32),
+    )
     def test_linear_cross_entropy_loss_default(self, device, dtype, bias):
-        if (
-            TEST_WITH_ROCM
-            and getRocmVersion() >= (7, 14)
-            and not bias
-            and dtype == torch.float32
-        ):
-            self.skipTest(
-                "input-grad ULP worst case exceeds tolerance on ROCm 7.14+ "
-                "(bias=False, float32)"
-            )
         self._test_linear_cross_entropy_loss(device=device, dtype=dtype, bias=bias)
 
     @parametrize_test("prob_target", [False, True])
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     @parametrize_test("bias", [False, True])
+    @decorateIf(
+        unittest.skip('MPS does not support fp64'),
+        lambda p: 'mps' in p['device'],
+    )
     def test_linear_cross_entropy_chunked_gradcheck(
         self, device, acc_policy, bias, prob_target
     ):
@@ -14297,8 +14321,6 @@ class TestNNDeviceType(NNTestCase):
         The unchunked reference (``options=None``) is gradchecked
         separately inside ``_test_linear_cross_entropy_loss``.
         """
-        if "mps" in device:
-            self.skipTest("MPS does not support fp64")
         torch.manual_seed(7)
         N, F, V = 4, 3, 5
         inp = torch.randn(N, F, device=device, dtype=torch.float64,
@@ -14383,6 +14405,10 @@ class TestNNDeviceType(NNTestCase):
         )
         self.assertEqual(expected, actual)
 
+    @decorateIf(
+        unittest.skip('MPS does not support fp64'),
+        lambda p: 'mps' in p['device'],
+    )
     def test_linear_cross_entropy_linear_bias_gradcheck(self, device):
         """``torch.autograd.gradcheck`` against ``linear_bias`` on the
         reference path. Also indirectly covered by OpInfo's
@@ -14391,8 +14417,6 @@ class TestNNDeviceType(NNTestCase):
         ``requires_grad=True``); kept here as a discoverable test that
         does not depend on OpInfo machinery.
         """
-        if "mps" in device:
-            self.skipTest("MPS does not support fp64")
         torch.manual_seed(0)
         N, F_, C = 3, 4, 5
         inp = torch.randn(N, F_, device=device, dtype=torch.float64, requires_grad=True)
@@ -14496,6 +14520,10 @@ class TestNNDeviceType(NNTestCase):
 
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
+    @decorateIf(
+        unittest.skip('bf16 requires SM80+ on CUDA'),
+        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not SM80OrLater),
+    )
     def test_linear_cross_entropy_none_reduction_chunked(
         self, device, dtype, bias
     ):
@@ -14508,8 +14536,6 @@ class TestNNDeviceType(NNTestCase):
         unsaturated (mild cancellation, error ~ dtype eps); worst-case ULP
         calibration across (policy, dtype, device) belongs in the harness.
         """
-        if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
-            self.skipTest("bf16 requires SM80+ on CUDA")
         torch.manual_seed(0)
         N, F_, C = 16, 8, 32
         inp = (torch.randn(N, F_, device=device, dtype=dtype) * 0.5).requires_grad_(True)
@@ -14690,17 +14716,15 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
+    @decorateIf(
+        unittest.skip('times out on ROCm 10'),
+        lambda p: TEST_WITH_ROCM and (torch.version.rocm or '0').split('.')[0] == '10' and (not p['bias']) and (p['dtype'] == torch.float16) and (p['acc_policy'] == 'compact'),
+    )
+    @decorateIf(
+        unittest.skip('bf16 requires SM80+ on CUDA'),
+        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not SM80OrLater),
+    )
     def test_linear_cross_entropy_loss_with_acc_dtype(self, device, dtype, acc_policy, bias):
-        if (
-            TEST_WITH_ROCM
-            and (torch.version.rocm or "0").split(".")[0] == "10"
-            and not bias
-            and dtype == torch.float16
-            and acc_policy == "compact"
-        ):
-            self.skipTest("times out on ROCm 10")
-        if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
-            self.skipTest("bf16 requires SM80+ on CUDA")
         self._test_linear_cross_entropy_loss(
             device=device, dtype=dtype, acc_policy=acc_policy,
             acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
@@ -14709,25 +14733,23 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
+    @decorateIf(
+        unittest.skip('times out on ROCm 10'),
+        lambda p: TEST_WITH_ROCM and (torch.version.rocm or '0').split('.')[0] == '10' and (not p['bias']) and (p['dtype'] == torch.bfloat16) and (p['acc_policy'] == 'auto'),
+    )
+    @decorateIf(
+        unittest.skip('bf16 requires SM80+ on CUDA'),
+        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not SM80OrLater),
+    )
     def test_linear_cross_entropy_loss_none_reduction_with_acc_dtype(
         self, device, dtype, acc_policy, bias
     ):
-        if (
-            TEST_WITH_ROCM
-            and (torch.version.rocm or "0").split(".")[0] == "10"
-            and not bias
-            and dtype == torch.bfloat16
-            and acc_policy == "auto"
-        ):
-            self.skipTest("times out on ROCm 10")
         # reduction='none' counterpart of
         # test_linear_cross_entropy_loss_with_acc_dtype: exercises the
         # no_reduction op (per-sample loss + recompute backward)
         # against the fp64 reference across acc_policy / dtype / bias,
         # with its own ULP caps. See the ``none_reduction`` cap block
         # in _test_linear_cross_entropy_loss.
-        if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
-            self.skipTest("bf16 requires SM80+ on CUDA")
         self._test_linear_cross_entropy_loss(
             device=device, dtype=dtype, acc_policy=acc_policy,
             acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
@@ -14747,14 +14769,16 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
+    @decorateIf(
+        unittest.skip('bf16 requires SM80+ on CUDA'),
+        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not SM80OrLater),
+    )
     def test_linear_cross_entropy_loss_prob_target_with_acc_dtype(
         self, device, dtype, acc_policy, bias
     ):
         # Mixed-precision probability-target leg (exercises the
         # prob_target_buf scratch: weight*target staged at the logits
         # dtype).
-        if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
-            self.skipTest("bf16 requires SM80+ on CUDA")
         self._test_linear_cross_entropy_loss(
             device=device, dtype=dtype, acc_policy=acc_policy,
             acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
@@ -14777,11 +14801,13 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
+    @decorateIf(
+        unittest.skip('bf16 requires SM80+ on CUDA'),
+        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not SM80OrLater),
+    )
     def test_linear_cross_entropy_loss_prob_target_none_reduction_with_acc_dtype(
         self, device, dtype, acc_policy, bias
     ):
-        if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
-            self.skipTest("bf16 requires SM80+ on CUDA")
         self._test_linear_cross_entropy_loss(
             device=device, dtype=dtype, acc_policy=acc_policy,
             acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
@@ -14935,6 +14961,10 @@ class TestNNDeviceType(NNTestCase):
         )
 
     @parametrize_test("reduction", ["sum", "mean"])
+    @decorateIf(
+        unittest.skip('MPS does not support fp64'),
+        lambda p: 'mps' in p['device'],
+    )
     def test_linear_cross_entropy_chunk_size_invariance(self, device, reduction):
         """Chunked op output is invariant w.r.t. ``batch_chunk_size``,
         within floating-point rounding.
@@ -14970,8 +15000,6 @@ class TestNNDeviceType(NNTestCase):
         ``_test_linear_cross_entropy_loss`` against the fp64
         reference.
         """
-        if "mps" in device:
-            self.skipTest("MPS does not support fp64")
         torch.manual_seed(42)
         N, F, C = 13, 5, 4
 
@@ -16266,16 +16294,15 @@ class TestNNDeviceType(NNTestCase):
         ],
         name_fn=lambda f, b, m, t: f"{f}_vs_{b}{'_mixed' if m else ''}_{dtype_name(t)}"
     )
+    @decorateIf(
+        unittest.skip('Failed on CUDA'),
+        lambda p: torch.version.cuda and p['mode'] == 'train' and p['mixed'] and (p['dtype'] == torch.bfloat16) and ((p['memory_format'], p['ref_backend']) in (('NCHW', 'cpu'), ('NHWC', 'NCHW'))),
+    )
+    @decorateIf(
+        unittest.skip('Failed on CUDA'),
+        lambda p: torch.version.cuda and p['mode'] == 'train' and p['mixed'] and (p['dims'] == 3) and (p['dtype'] == torch.half) and ((p['memory_format'], p['ref_backend']) == ('NCHW', 'native')),
+    )
     def test_batchnorm(self, device, dims, mode, memory_format, ref_backend, mixed, dtype):
-        # skip conditions are expressed via the test parameters instead of
-        # self._testMethodName because instantiated names carry device/dtype suffixes
-        fmt_ref = (memory_format, ref_backend)
-        if torch.version.cuda:
-            if mode == "train" and mixed and dtype == torch.bfloat16 and fmt_ref in (("NCHW", "cpu"), ("NHWC", "NCHW")):
-                self.skipTest("Failed on CUDA")
-
-            if mode == "train" and mixed and dims == 3 and dtype == torch.half and fmt_ref == ("NCHW", "native"):
-                self.skipTest("Failed on CUDA")
 
         if dims == 3 and memory_format in ("NHWC", "NCHW"):
             memory_format = memory_format + "3D"

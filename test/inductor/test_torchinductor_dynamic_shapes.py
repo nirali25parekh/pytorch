@@ -255,14 +255,11 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
         )
 
 
+@unittest.skipIf(not HAS_GPU, "Triton not available")
 class TestInductorDynamic(DynamicShapesTestCase):
     compile_fn = staticmethod(partial(torch.compile, dynamic=True))
 
     def setUp(self):
-        # HAS_CUDA_AND_TRITON also checks compute capability to skip tests
-        # on older devices
-        if not HAS_GPU:
-            self.skipTest("Triton not available")
         torch._dynamo.reset()
         super().setUp()
         # this should be in setUpClass, but device-generic tests

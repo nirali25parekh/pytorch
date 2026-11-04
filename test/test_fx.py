@@ -1038,9 +1038,8 @@ class TestFX(JitTestCase):
         m = M()
         self.checkGraphModule(m, (a, b))
 
+    @unittest.skipIf(IS_FBCODE or IS_WINDOWS or IS_MACOS, 'non-portable load_library call used in test')
     def test_native_callable(self):
-        if IS_FBCODE or IS_WINDOWS or IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
         # This test exercises the case where we use FX to translate from Python
         # code to some native callable object
         #
@@ -3749,11 +3748,8 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         with self.assertRaisesRegex(AttributeError, "__update_args_kwargs"):
             node.__update_args_kwargs((), {})
 
+    @unittest.skipIf(IS_FBCODE or IS_WINDOWS or IS_MACOS, 'torch.classes._TorchScriptTesting._StackString is registered, skipping')
     def test_torchbind_class_attribute_in_fx(self):
-        if IS_FBCODE or IS_WINDOWS or IS_MACOS:
-            self.skipTest(
-                "torch.classes._TorchScriptTesting._StackString is registered, skipping"
-            )
 
         class FooBar1234(torch.nn.Module):
             def __init__(self) -> None:
@@ -3766,11 +3762,8 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         m = FooBar1234()
         self.checkGraphModule(m, ())
 
+    @unittest.skipIf(IS_FBCODE or IS_WINDOWS or IS_MACOS, 'torch.classes._TorchScriptTesting._ReLUClass is registered, skipping')
     def test_torchbind_class_attribute_in_fx_tensor_arg(self):
-        if IS_FBCODE or IS_WINDOWS or IS_MACOS:
-            self.skipTest(
-                "torch.classes._TorchScriptTesting._ReLUClass is registered, skipping"
-            )
 
         class FooBar2341(torch.nn.Module):
             def __init__(self) -> None:
@@ -5749,10 +5742,8 @@ class TestOperatorSignatures(JitTestCase):
             self.orig_tracer_mutable_flag
         )
 
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops([op for op in op_db if isinstance(op.op, types.BuiltinFunctionType)], allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
-        if not isinstance(op.op, types.BuiltinFunctionType):
-            raise unittest.SkipTest("This path doesn't work on Python functions")
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         schemas = get_signature_for_torch_op(op.op)
         if not schemas:

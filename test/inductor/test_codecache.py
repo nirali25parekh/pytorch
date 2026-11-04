@@ -96,6 +96,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
@@ -882,6 +883,26 @@ class TestFxGraphCache(TestCase):
             any("example_inputs[0]" in line for line in cache_payloads[0]["components"])
         )
 
+    @decorateIf(
+        unittest.skip(f"requires {GPU_TYPE}"),
+        lambda params: params["device"] == GPU_TYPE and (not HAS_GPU),
+    )
+    @decorateIf(
+        unittest.skip("requires SM80 or later"),
+        lambda params: params["device"] == "cuda"
+        and torch.version.hip is None
+        and (params["dtype"] == torch.bfloat16)
+        and (not SM80OrLater),
+    )
+    @decorateIf(
+        unittest.skip("Static triton launcher requires cuda/xpu and triton bundling"),
+        lambda params: params["use_static_triton_launcher"]
+        and (
+            not (
+                params["device"] in STATIC_LAUNCHER_DEVICES and params["bundle_triton"]
+            )
+        ),
+    )
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -898,22 +919,6 @@ class TestFxGraphCache(TestCase):
         """
         Verify that we can populate and load functions from the cache.
         """
-        if device == GPU_TYPE and not HAS_GPU:
-            raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if (
-            device == "cuda"
-            and torch.version.hip is None
-            and dtype == torch.bfloat16
-            and not SM80OrLater
-        ):
-            raise unittest.SkipTest("requires SM80 or later")
-        if use_static_triton_launcher and not (
-            device in STATIC_LAUNCHER_DEVICES and bundle_triton
-        ):
-            raise unittest.SkipTest(
-                "Static triton launcher requires cuda/xpu and triton bundling"
-            )
-
         grad_multiplier = 2 if grad else 1
 
         def fn(x, y):
@@ -1144,6 +1149,26 @@ class TestFxGraphCache(TestCase):
             torch.set_default_dtype(old_dtype)
             FxGraphCache.clear()
 
+    @decorateIf(
+        unittest.skip(f"requires {GPU_TYPE}"),
+        lambda params: params["device"] == GPU_TYPE and (not HAS_GPU),
+    )
+    @decorateIf(
+        unittest.skip("requires SM80 or later"),
+        lambda params: params["device"] == "cuda"
+        and torch.version.hip is None
+        and (params["dtype"] == torch.bfloat16)
+        and (not SM80OrLater),
+    )
+    @decorateIf(
+        unittest.skip("Static cuda launcher requires cuda and triton bundling"),
+        lambda params: params["use_static_triton_launcher"]
+        and (
+            not (
+                params["device"] in STATIC_LAUNCHER_DEVICES and params["bundle_triton"]
+            )
+        ),
+    )
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -1158,22 +1183,6 @@ class TestFxGraphCache(TestCase):
         self, device, dtype, dynamic, bundle_triton, use_static_triton_launcher
     ):
         from unittest.mock import patch
-
-        if device == GPU_TYPE and not HAS_GPU:
-            raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if (
-            device == "cuda"
-            and torch.version.hip is None
-            and dtype == torch.bfloat16
-            and not SM80OrLater
-        ):
-            raise unittest.SkipTest("requires SM80 or later")
-        if use_static_triton_launcher and not (
-            device in STATIC_LAUNCHER_DEVICES and bundle_triton
-        ):
-            raise unittest.SkipTest(
-                "Static cuda launcher requires cuda and triton bundling"
-            )
 
         def fn(x, y):
             return (x * 2, y @ y)
@@ -1215,6 +1224,17 @@ class TestFxGraphCache(TestCase):
         for k in global_stats.fx_graph.cache:
             self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
+    @decorateIf(
+        unittest.skip(f"requires {GPU_TYPE}"),
+        lambda params: params["device"] == GPU_TYPE and (not HAS_GPU),
+    )
+    @decorateIf(
+        unittest.skip("requires SM80 or later"),
+        lambda params: params["device"] == "cuda"
+        and torch.version.hip is None
+        and (params["dtype"] == torch.bfloat16)
+        and (not SM80OrLater),
+    )
     @requires_triton()
     @config.patch(
         {
@@ -1231,15 +1251,6 @@ class TestFxGraphCache(TestCase):
         """
         Verify that we can populate and hot load functions from the cache.
         """
-        if device == GPU_TYPE and not HAS_GPU:
-            raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if (
-            device == "cuda"
-            and torch.version.hip is None
-            and dtype == torch.bfloat16
-            and not SM80OrLater
-        ):
-            raise unittest.SkipTest("requires SM80 or later")
 
         def fn(x, y):
             return x.sin() @ y
@@ -1307,6 +1318,17 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
+    @decorateIf(
+        unittest.skip(f"requires {GPU_TYPE}"),
+        lambda params: params["device"] == GPU_TYPE and (not HAS_GPU),
+    )
+    @decorateIf(
+        unittest.skip("requires SM80 or later"),
+        lambda params: params["device"] == "cuda"
+        and torch.version.hip is None
+        and (params["dtype"] == torch.bfloat16)
+        and (not SM80OrLater),
+    )
     @requires_triton()
     @config.patch(
         {
@@ -1327,16 +1349,6 @@ class TestFxGraphCache(TestCase):
         """
         Verify that we can populate and hot load functions from the cache.
         """
-
-        if device == GPU_TYPE and not HAS_GPU:
-            raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if (
-            device == "cuda"
-            and torch.version.hip is None
-            and dtype == torch.bfloat16
-            and not SM80OrLater
-        ):
-            raise unittest.SkipTest("requires SM80 or later")
 
         def fn(x, y):
             return x.sin() @ y
@@ -1777,6 +1789,10 @@ class TestFxGraphCache(TestCase):
         _, cache_info = artifacts
         self.assertEqual(len(cache_info.test_artifacts), 1)
 
+    @decorateIf(
+        unittest.skip(f"requires {GPU_TYPE}"),
+        lambda params: params["device"] == GPU_TYPE and (not HAS_GPU),
+    )
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -1787,8 +1803,6 @@ class TestFxGraphCache(TestCase):
         """
         Verify that we can populate and load models from the cache.
         """
-        if device == GPU_TYPE and not HAS_GPU:
-            raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         def fn(mod, x):
             mod.zero_grad()
@@ -1817,6 +1831,17 @@ class TestFxGraphCache(TestCase):
         # And the results should be the same.
         self.assertEqual(grads1, grads2)
 
+    @decorateIf(
+        unittest.skip(f"requires {GPU_TYPE}"),
+        lambda params: params["device"] == GPU_TYPE and (not HAS_GPU),
+    )
+    @decorateIf(
+        unittest.skip("requires CUDA SM80 or later"),
+        lambda params: params["device"] == "cuda"
+        and torch.version.hip is None
+        and (params["dtype"] == torch.bfloat16)
+        and (not SM80OrLater),
+    )
     @largeTensorTest("64GB", device=GPU_TYPE, inductor=True)
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -1827,15 +1852,6 @@ class TestFxGraphCache(TestCase):
         Test caching the same graph, but under conditions that introduce guards
         for tensor sizes < int32.
         """
-        if device == GPU_TYPE and not HAS_GPU:
-            raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if (
-            device == "cuda"
-            and torch.version.hip is None
-            and dtype == torch.bfloat16
-            and not SM80OrLater
-        ):
-            raise unittest.SkipTest("requires CUDA SM80 or later")
 
         def fn(x, y):
             return (x + x, y + y)
@@ -1872,6 +1888,17 @@ class TestFxGraphCache(TestCase):
 
             self.assertEqual(res1, res2)
 
+    @decorateIf(
+        unittest.skip(f"requires {GPU_TYPE}"),
+        lambda params: params["device"] == GPU_TYPE and (not HAS_GPU),
+    )
+    @decorateIf(
+        unittest.skip("requires SM80 or later"),
+        lambda params: params["device"] == "cuda"
+        and torch.version.hip is None
+        and (params["dtype"] == torch.bfloat16)
+        and (not SM80OrLater),
+    )
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -1881,15 +1908,6 @@ class TestFxGraphCache(TestCase):
         Test caching the same graph, but under conditions that introduce guards
         for static bounds.
         """
-        if device == GPU_TYPE and not HAS_GPU:
-            raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if (
-            device == "cuda"
-            and torch.version.hip is None
-            and dtype == torch.bfloat16
-            and not SM80OrLater
-        ):
-            raise unittest.SkipTest("requires SM80 or later")
 
         # See lowering; for all of the pooling operators, we always guard and
         # make the height/width static.
@@ -2000,6 +2018,10 @@ class TestFxGraphCache(TestCase):
 
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
+    @decorateIf(
+        unittest.skip(f"requires {GPU_TYPE}"),
+        lambda params: params["device"] == GPU_TYPE and (not HAS_GPU),
+    )
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -2007,8 +2029,6 @@ class TestFxGraphCache(TestCase):
         """
         Test that different constants are recognized correctly.
         """
-        if device == GPU_TYPE and not HAS_GPU:
-            raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         def fn1(x):
             return x + torch.tensor(list(range(12)), device=device)
@@ -2873,25 +2893,22 @@ class TestFxGraphCache(TestCase):
         # without any additional cache misses or dynamo recompilations.
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
 
+    @decorateIf(
+        unittest.skip(f"requires {GPU_TYPE}"),
+        lambda params: params["device"] == GPU_TYPE and (not HAS_GPU),
+    )
+    @decorateIf(
+        unittest.skip("mkldnn tensors unsupported"),
+        lambda params: params["device"] == "cpu"
+        and torch.backends.mkldnn.is_available()
+        and torch.ops.mkldnn._is_mkldnn_fp16_supported(),
+    )
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"freezing": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("inlinable", (True, False))
     def test_freezing(self, device, inlinable):
-        if device == GPU_TYPE and not HAS_GPU:
-            raise unittest.SkipTest(f"requires {GPU_TYPE}")
-
-        # For machines with mkldnn_fp16 support, weight_pack in mkldnn_fusion.py causes
-        # the creation of a mkldnn format tensor which the current implementation does
-        # not support.
-        if (
-            device == "cpu"
-            and torch.backends.mkldnn.is_available()
-            and torch.ops.mkldnn._is_mkldnn_fp16_supported()
-        ):
-            raise unittest.SkipTest("mkldnn tensors unsupported")
-
         # The shape of the frozen constant determines if it will be inlined.
         shape = (4,) if inlinable else (8, 8)
 
@@ -2982,6 +2999,14 @@ class TestStandaloneCompile(TestCase):
 
         return inner
 
+    @decorateIf(
+        unittest.skip(f"requires {GPU_TYPE}"),
+        lambda params: params["device"] == GPU_TYPE and (not HAS_GPU),
+    )
+    @decorateIf(
+        unittest.skip("AOT mode does not support unpacked format"),
+        lambda params: params["is_aot"] and params["format"] == "unpacked",
+    )
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -2998,13 +3023,6 @@ class TestStandaloneCompile(TestCase):
         graph_partition: bool,
         is_aot: bool,
     ) -> None:
-        if device == GPU_TYPE and not HAS_GPU:
-            raise unittest.SkipTest(f"requires {GPU_TYPE}")
-
-        # AOT mode does not support unpacked format
-        if is_aot and format == "unpacked":
-            raise unittest.SkipTest("AOT mode does not support unpacked format")
-
         mod = torch.nn.Linear(1, 3, device=device)
         x = torch.randn(4, 1, device=device)
         if dynamic:
@@ -3208,14 +3226,15 @@ class TestStandaloneCompile(TestCase):
                 )
                 self.assertEqual(mod.bias.grad, torch.full_like(mod.bias, x.shape[0]))
 
+    @decorateIf(
+        unittest.skip(f"requires {GPU_TYPE}"),
+        lambda params: params["device"] == GPU_TYPE and (not HAS_GPU),
+    )
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
     def test_modify_unpacked_file(self, device: str) -> None:
-        if device == GPU_TYPE and not HAS_GPU:
-            raise unittest.SkipTest(f"requires {GPU_TYPE}")
-
         x = torch.ones(4, device=device)
 
         def f(x):

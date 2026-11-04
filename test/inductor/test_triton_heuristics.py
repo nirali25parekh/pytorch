@@ -1207,6 +1207,7 @@ class TestTritonHeuristics(TestCase):
                         self.assertEqual(configs, [tuned], msg=arch)
                         self.assertNotEqual(configs, fallback, msg=arch)
 
+    @unittest.skipIf(not torch.version.hip, "ROCm-specific MFMA config pruning")
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize(
         "arch,f16_count,int8_count,int8_kpack",
@@ -1220,8 +1221,6 @@ class TestTritonHeuristics(TestCase):
     def test_rocm_prune_block_k_underfills_mfma(
         self, arch, f16_count, int8_count, int8_kpack
     ):
-        if not torch.version.hip:
-            self.skipTest("ROCm-specific MFMA config pruning")
         from torch._inductor.heuristics.template.triton import (
             BaseHeuristicSingleton,
             GemmConfig,

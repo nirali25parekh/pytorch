@@ -56,6 +56,8 @@ import torch.backends.opt_einsum as opt_einsum
 import operator
 import contextlib
 from torch.testing._internal.common_utils import (
+    IS_ARM64,
+    decorateIf,
     IS_LINUX,
     TEST_WITH_SLOW,
     set_warn_always_context,
@@ -2923,11 +2925,13 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @dtypes(torch.double, torch.cdouble)
+    @decorateIf(
+        unittest.skip('linalg.svd of the projected complex128 matrix fails to converge on ROCm'),
+        lambda p: torch.version.hip and torch.device(p['device']).type == 'cuda' and (p['dtype'] is torch.complex128),
+    )
     def test_svd_lowrank(self, device, dtype):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
-        if torch.version.hip and torch.device(device).type == "cuda" and dtype is torch.complex128:
-            self.skipTest("linalg.svd of the projected complex128 matrix fails to converge on ROCm")
 
         def run_subtest(actual_rank, matrix_size, batches, device, svd_lowrank, **options):
             density = options.pop('density', 1)
@@ -4435,14 +4439,16 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoCusolver
     @skipIfNoNvmath
     @dtypes(torch.float, torch.double)
+    @decorateIf(
+        unittest.skip('cuSOLVER Xpolar path is CUDA-only'),
+        lambda p: torch.device(p['device']).type != 'cuda',
+    )
     def test_polar_matches_svd(self, device, dtype):
         # On CUDA with nvmath present, the cuSOLVER Xpolar path and the SVD-based
         # aten kernel should agree on the polar factors. Invoke the Xpolar kernel
         # directly so the comparison exercises it specifically, and check the
         # reported residual is small. A full-rank input makes the polar
         # decomposition unique, so the two algorithms must match exactly.
-        if torch.device(device).type != "cuda":
-            self.skipTest("cuSOLVER Xpolar path is CUDA-only")
         from torch._native.ops.polar import nvmath_impl as nv
         from torch._native.ops.polar.impl import _check_nvmath
 
@@ -6493,11 +6499,12 @@ class TestLinalg(TestCase):
     @parametrize("n", [16, 32])
     @parametrize("use_transpose_a", [True, False])
     @parametrize("use_transpose_b", [True, False])
+    @decorateIf(
+        unittest.skip('xfail on CUDA 13 until cuBLAS adds the supported kernel'),
+        lambda p: not TEST_WITH_ROCM and _get_torch_cuda_version() >= (13, 0) and (not p['use_transpose_a']) and (not p['use_transpose_b']),
+    )
     def test__int_mm(self, device, k, n, use_transpose_a, use_transpose_b):
         # Skip specific failing cases on CUDA 13.0
-        if (not TEST_WITH_ROCM) and _get_torch_cuda_version() >= (13, 0):
-            if not use_transpose_a and not use_transpose_b:
-                self.skipTest("xfail on CUDA 13 until cuBLAS adds the supported kernel")
 
         def genf_int_float(x, y, use_transpose):
             if use_transpose:
@@ -6606,12 +6613,16 @@ class TestLinalg(TestCase):
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
+    @decorateIf(
+        unittest.skip('requires SM80 or later'),
+        lambda p: torch.device(p['device']).type == 'cuda' and (not SM80OrLater),
+    )
+    @decorateIf(
+        unittest.skip('_convert_weight_to_int4pack_cuda is supported only for CDNA2 or later, or RDNA3 or later'),
+        lambda p: TEST_WITH_ROCM and torch.device(p['device']).type == 'cuda' and (not (CDNA2OrLater() or RDNA3OrLater())),
+    )
     def test__int4_mm(self, device, m, k, n):
-        if self.device_type == 'cuda' and not SM80OrLater:
-            self.skipTest("requires SM80 or later")
 
-        if TEST_WITH_ROCM and self.device_type == 'cuda' and not (CDNA2OrLater() or RDNA3OrLater()):
-            self.skipTest("_convert_weight_to_int4pack_cuda is supported only for CDNA2 or later, or RDNA3 or later")
 
         q_group = 32
         inner_k_tiles = 2
@@ -6675,12 +6686,16 @@ class TestLinalg(TestCase):
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
+    @decorateIf(
+        unittest.skip('requires SM80 or later'),
+        lambda p: torch.device(p['device']).type == 'cuda' and (not SM80OrLater),
+    )
+    @decorateIf(
+        unittest.skip('_convert_weight_to_int4pack_cuda supported only for CDNA2 or later, or RDNA3 or later'),
+        lambda p: TEST_WITH_ROCM and torch.device(p['device']).type == 'cuda' and (not (CDNA2OrLater() or RDNA3OrLater())),
+    )
     def test_compile_int4_mm(self, device, m, k, n):
-        if self.device_type == 'cuda' and not SM80OrLater:
-            self.skipTest("requires SM80 or later")
 
-        if TEST_WITH_ROCM and self.device_type == 'cuda' and not (CDNA2OrLater() or RDNA3OrLater()):
-            self.skipTest("_convert_weight_to_int4pack_cuda supported only for CDNA2 or later, or RDNA3 or later")
 
         q_group = 32
         inner_k_tiles = 2
@@ -6725,11 +6740,13 @@ class TestLinalg(TestCase):
     @onlyNativeDeviceTypes
     @parametrize("k", [64, 256])
     @parametrize("n", [32, 48, 64, 128])
+    @decorateIf(
+        unittest.skip('CUDA Backend is unsupported'),
+        lambda p: torch.device(p['device']).type == 'cuda',
+    )
     def test__dyn_quant_pack_4bit_weight(self, device, k, n):
         # TODO: Fix https://github.com/pytorch/pytorch/issues/131425 and use OpInfo instead
         # Weight shape is [K x N]
-        if self.device_type == "cuda":
-            self.skipTest("CUDA Backend is unsupported")
 
         torch.manual_seed(1)
         block_size = 32
@@ -6753,9 +6770,11 @@ class TestLinalg(TestCase):
     @parametrize("m", [1, 32])
     @parametrize("k", [64, 128])
     @parametrize("n", [4096, 11008])
+    @decorateIf(
+        unittest.skip('CUDA is unsupported'),
+        lambda p: torch.device(p['device']).type == 'cuda',
+    )
     def test__dyn_quant_matmul_4bit(self, device, m, k, n):
-        if self.device_type == "cuda":
-            self.skipTest("CUDA is unsupported")
 
         q_group = 32
 
@@ -6825,9 +6844,11 @@ class TestLinalg(TestCase):
     @parametrize("m", [1, 32])
     @parametrize("k", [64, 128])
     @parametrize("n", [4096, 11008])
+    @decorateIf(
+        unittest.skip('CUDA is unsupported'),
+        lambda p: torch.device(p['device']).type == 'cuda',
+    )
     def test_compile_dyn_quant_matmul_4bit(self, device, m, k, n):
-        if self.device_type == "cuda":
-            self.skipTest("CUDA is unsupported")
 
         q_group = 32
 
@@ -9165,13 +9186,12 @@ class TestLinalgSVD(TestCase):
         self.assertEqual((U[..., :k] * S.unsqueeze(-2)) @ Vh[..., :k, :], A.to(ref_dtype), atol=vec_atol, rtol=0)
 
 
+@unittest.skipIf(not torch.cuda.is_available(), 'CUDA required')
 class TestLinalgCudaOnly(TestCase):
     """CUDA/ROCm-specific linalg tests (TunableOp, backend library selection)."""
 
     def setUp(self):
         super().setUp()
-        if not torch.cuda.is_available():
-            self.skipTest("CUDA required")
         # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
         # backend-specific fp32_precision, so snapshot and restore all of it.
         self._prev_fp32_state = _snapshot_fp32_precision()
@@ -9574,9 +9594,9 @@ class TestLinalgCudaOnly(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @dtypes(e4m3_type, e5m2_type)
+    @decorateIf(unittest.skip("CUDA does not support e5m2 x e5m2 scaled GEMM"),
+                lambda p: not TEST_WITH_ROCM and p["dtype"] is e5m2_type)
     def test_scaled_gemm_offline_tunableop(self, device, dtype):
-        if not TEST_WITH_ROCM and dtype is e5m2_type:
-            raise unittest.SkipTest("CUDA does not support e5m2 x e5m2 scaled GEMM")
 
         import os
         # This test is the offline version of test_scaled_gemm_tunableop
@@ -10264,6 +10284,8 @@ class TestLinalgCudaOnly(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @dtypes(e4m3_type, e5m2_type)
+    @decorateIf(unittest.skip("CUDA does not support e5m2 x e5m2 scaled GEMM"),
+                lambda p: not TEST_WITH_ROCM and p["dtype"] is e5m2_type)
     def test_scaled_gemm_tunableop(self, device, dtype):
         # Test Scaled GEMM tuning.
         # We do not test the full set of scaled GEMM parameters, since
@@ -10275,8 +10297,6 @@ class TestLinalgCudaOnly(TestCase):
         #
         # Refer to test/test_matmul_cuda for support combinations that are
         # tested by PyTorch
-        if not TEST_WITH_ROCM and dtype is e5m2_type:
-            raise unittest.SkipTest("CUDA does not support e5m2 x e5m2 scaled GEMM")
         with self._tunableop_ctx():
             # set these to single iterations to keep it short but still exercise the code
             torch.cuda.tunable.set_rotating_buffer_size(0)
@@ -11816,9 +11836,11 @@ class TestLinalgCudaOnly(TestCase):
     @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
     @setBlasBackendsToDefaultFinally
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.float64])
+    @decorateIf(
+        unittest.skip('bfloat16 case skipped on gfx90a'),
+        lambda p: p['dtype'] == torch.bfloat16 and isRocmArchAnyOf(MI200_ARCH),
+    )
     def test_ck_blas_library_mm(self, dtype):
-        if dtype == torch.bfloat16 and isRocmArchAnyOf(MI200_ARCH):
-            self.skipTest("bfloat16 case skipped on gfx90a")
         device = 'cuda'
         shapes = [(7168, 8192, 1280), (1280, 8192, 7168), (8192, 8192, 1280)]
         for M, K, N in shapes:
@@ -12261,6 +12283,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     # NOTE: This is intended to cover fp16_gemv_trans in
     # BlasKernel.cpp. Currently, bounds being divisible by 32, 8-but-not-32, and
     # 4-but-not-8 all matter.
+    @unittest.skipIf(not IS_ARM64, "Float16 arithmetic is only supported on ARM CPUs")
     def test_fp16_mv_transposed_first_argument_arm_cpu(self, device, m, k):
         torch.manual_seed(1)
         a = torch.rand((m, k), dtype=torch.half, device=device)
@@ -12357,14 +12380,14 @@ class TestGroupedMM(TestCase):
     @parametrize("b_row_major", [False, True])
     @parametrize("a_shape,b_shape,offsets,backward", _GROUPED_MM_CASES)
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
+    @decorateIf(
+        unittest.skip('Unaligned cases require the CUDA float32 fallback'),
+        lambda p: torch.device(p["device"]).type == "cuda" and p["dtype"] != torch.float32 and any(size % (16 // p["dtype"].itemsize) for size in p["a_shape"][-2:] + p["b_shape"][-2:] + tuple(p["offsets"] or ())),
+    )
     def test_grouped_gemm(self, device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype):
         self._check_grouped_gemm(device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype)
 
     def _check_grouped_gemm(self, device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype):
-        sizes = a_shape[-2:] + b_shape[-2:] + tuple(offsets or ())
-        unaligned = any(size % (16 // dtype.itemsize) for size in sizes)
-        if self.device_type == "cuda" and dtype != torch.float32 and unaligned:
-            self.skipTest("Unaligned cases require the CUDA float32 fallback")
         a = self._make_grouped_mm_matrix(a_shape, a_row_major, device, dtype, strided)
         b = self._make_grouped_mm_matrix(b_shape, b_row_major, device, dtype, strided)
         offs = None if offsets is None else torch.tensor(offsets, device=device, dtype=torch.int32)
@@ -12379,10 +12402,16 @@ class TestGroupedMM(TestCase):
     @parametrize("b_row_major", [False, True])
     @parametrize("a_shape,b_shape,offsets,backward", _GROUPED_MM_CASES)
     @dtypes(torch.bfloat16, torch.float16)
+    @decorateIf(
+        unittest.skip('ck_tile grouped gemm is only dispatched on gfx942 and gfx950'),
+        lambda p: p['backend'] == 'ck_tile' and (not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH)),
+    )
+    @decorateIf(
+        unittest.skip('Unaligned cases require the CUDA float32 fallback'),
+        lambda p: torch.device(p["device"]).type == "cuda" and p["dtype"] != torch.float32 and any(size % (16 // p["dtype"].itemsize) for size in p["a_shape"][-2:] + p["b_shape"][-2:] + tuple(p["offsets"] or ())),
+    )
     def test_grouped_gemm_rocm_backend(self, device, backend, strided, a_row_major, b_row_major, a_shape, b_shape, offsets,
                                        backward, dtype):
-        if backend == "ck_tile" and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
-            self.skipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
         env_var = {"ck": "ROCM_ALLOW_GROUP_GEMM_CK", "ck_tile": "ROCM_ALLOW_GROUP_GEMM_CK_TILE"}[backend]
         with mock.patch.dict(os.environ, {env_var: "1"}):
             self._check_grouped_gemm(device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype)

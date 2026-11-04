@@ -6,6 +6,7 @@ import math
 import operator
 import random
 import sys
+import unittest
 import warnings
 from functools import partial
 from itertools import chain, product
@@ -58,6 +59,7 @@ from torch.testing._internal.common_methods_invocations import (
     generate_elementwise_binary_with_scalar_samples,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     gradcheck,
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -424,10 +426,10 @@ class TestBinaryUfuncsDevice(TestCase):
         self._test_reference_numerics(dtype, op, gen, equal_nan=True)
 
     @ops(binary_ufuncs_with_references)
+    @decorateIf(
+        unittest.skip("Doesn't support bool!"), lambda p: p["dtype"] is torch.bool
+    )
     def test_reference_numerics_small_values(self, device, dtype, op):
-        if dtype is torch.bool:
-            self.skipTest("Doesn't support bool!")
-
         gen = generate_elementwise_binary_small_value_tensors(
             op, device=device, dtype=dtype
         )

@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     recover_orig_fp32_precision,
@@ -109,6 +110,10 @@ class SkipPatternTest(TestBase):
 )
 @instantiate_parametrized_tests
 class MixOrderReductionTest(TestBase):
+    @decorateIf(
+        unittest.skip("Invalid combination"),
+        lambda params: params["name"] == "prod" and len(params["shape"]) == 3,
+    )
     @parametrize(
         "name",
         [
@@ -122,10 +127,6 @@ class MixOrderReductionTest(TestBase):
     @parametrize("split_reductions", (False, True))
     @parametrize("shape", ((32768, 768), (32769, 768), (32, 1024, 768)))
     def test_mix_order_reduction(self, name, dtype, swap, split_reductions, shape):
-        # torch.prod does not accept tuple for dim argument
-        if name == "prod" and len(shape) == 3:
-            self.skipTest("Invalid combination")
-
         def f(x):
             def outer_red():
                 if len(shape) == 3:
@@ -487,6 +488,10 @@ class MixOrderReductionTest(TestBase):
             expected_mix_order_reduction, metrics.codegen_mix_order_reduction
         )
 
+    @decorateIf(
+        unittest.skip("Skip non-critical tests to save resources."),
+        lambda params: params["shape"] != (1000000, 256) and params["add_1dim"],
+    )
     @parametrize(
         "wdtype",
         [
@@ -521,9 +526,6 @@ class MixOrderReductionTest(TestBase):
             and initial_xblock == 1
             and inductor_config.triton.mix_order_reduction
         ):
-            self.skipTest("Skip non-critical tests to save resources.")
-
-        if shape != (1000000, 256) and add_1dim:
             self.skipTest("Skip non-critical tests to save resources.")
 
         def f(x, w, eps):

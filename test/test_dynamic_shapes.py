@@ -54,6 +54,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
+    decorateIf,
     expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -2398,42 +2399,41 @@ class TestSymNumberMagicMethods(TestCase):
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
-    @parametrize("fn", list(sym_node.magic_methods.keys()))
+    @parametrize(
+        "fn",
+        [
+            fn
+            for fn in sym_node.magic_methods
+            if fn in sym_node.bool_magic_methods and fn != "sym_ite"
+        ],
+    )
     def test_bool_method(self, fn):
-        # sym_ite has its own tests
-        if fn not in sym_node.bool_magic_methods or fn == "sym_ite":
-            self.skipTest(f"{fn} is non-bool")
-
         is_unary_fn = fn in sym_node.unary_methods
         shape_env = ShapeEnv()
         self._do_test(fn, True, False, shape_env, is_unary_fn)
 
-    @parametrize("fn", list(sym_node.magic_methods.keys()))
-    @parametrize("first_type", ["int", "float"])
+    @parametrize(
+        "fn",
+        [
+            fn
+            for fn in sym_node.magic_methods
+            if fn not in sym_node.only_float_magic_methods
+            and fn not in sym_node.bool_magic_methods
+        ],
+    )
+    @parametrize("first_type", ["int"])
     @parametrize("second_type", ["int", "float"])
+    @decorateIf(
+        unittest.skip("Second argument is unused or only accepts integers"),
+        lambda p: p["second_type"] == "float"
+        and (
+            p["fn"] in sym_node.bitwise_ops
+            or p["fn"] in sym_node.unary_methods
+            or p["fn"] in ("mod", "round")
+        ),
+    )
     def test_method(self, fn, first_type, second_type):
-        if first_type == "float":
-            # TODO: Hmm, this looks like we skip all floats
-            self.skipTest(f"{fn} is not a float magic method")
-
-        if (
-            first_type == "int" or second_type == "int"
-        ) and fn in sym_node.only_float_magic_methods:
-            self.skipTest(f"{fn} is not an int method")
-
-        if second_type == "float" and fn == "mod":
-            self.skipTest(f"{fn} only handles int")
-
-        if fn in sym_node.bitwise_ops and (first_type != "int" or second_type != "int"):
-            self.skipTest(f"{fn} is a bitwise op, only handles int")
-
         is_unary_fn = fn in sym_node.unary_methods or fn == "round"
-        # Second argument is ignored for unary function. So only run for one type
-        if is_unary_fn and second_type == "float":
-            self.skipTest(f"{fn} is unary and already tested")
-
-        if fn in sym_node.bool_magic_methods:
-            self.skipTest(f"{fn} is bool")
 
         # Only floats here since these will be converted to int if necessary.
         # We also ignore complex and bool.

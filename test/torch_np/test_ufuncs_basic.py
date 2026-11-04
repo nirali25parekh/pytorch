@@ -11,11 +11,12 @@ by
 """
 
 import operator
-from unittest import skipIf as skip, SkipTest
+from unittest import skipIf as skip
 
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -187,12 +188,14 @@ class TestBinaryUfuncs(TestCase):
     @parametrize_casting
     @parametrize_binary_ufuncs
     @parametrize("out_dtype", ["float64", "complex128", "float32"])
+    @decorateIf(
+        skip(True, reason="ufunc does not accept complex"),
+        lambda p: p["ufunc"] in no_complex
+        and np.issubdtype(p["out_dtype"], np.complexfloating),
+    )
     def test_xy_and_out_casting(self, ufunc, casting, out_dtype):
         x, y = self.get_xy(ufunc)
         out = np.empty_like(x, dtype=out_dtype)
-
-        if ufunc in no_complex and np.issubdtype(out_dtype, np.complexfloating):
-            raise SkipTest(f"{ufunc} does not accept complex.")
 
         can_cast_x = np.can_cast(x, out_dtype, casting=casting)
         can_cast_y = np.can_cast(y, out_dtype, casting=casting)
@@ -262,13 +265,15 @@ class TestNdarrayDunderVsUfunc(TestCase):
 
     @parametrize("ufunc, op, iop", ufunc_op_iop_numeric)
     @parametrize("other_dtype", dtypes_numeric)
+    @decorateIf(
+        skip(True, reason="ufunc does not accept complex"),
+        lambda p: p["ufunc"] in no_complex
+        and issubclass(p["other_dtype"], np.complexfloating),
+    )
     def test_other_scalar(self, ufunc, op, iop, other_dtype):
         """Test op/iop/rop when the other argument is a scalar of a different dtype."""
         a = np.array([1, 2, 3])
         b = other_dtype(3)
-
-        if ufunc in no_complex and issubclass(other_dtype, np.complexfloating):
-            raise SkipTest(f"{ufunc} does not accept complex.")
 
         # __op__
         result = op(a, b)
@@ -306,13 +311,15 @@ class TestNdarrayDunderVsUfunc(TestCase):
 
     @parametrize("ufunc, op, iop", ufunc_op_iop_numeric)
     @parametrize("other_dtype", dtypes_numeric)
+    @decorateIf(
+        skip(True, reason="ufunc does not accept complex"),
+        lambda p: p["ufunc"] in no_complex
+        and issubclass(p["other_dtype"], np.complexfloating),
+    )
     def test_other_array(self, ufunc, op, iop, other_dtype):
         """Test op/iop/rop when the other argument is an array of a different dtype."""
         a = np.array([1, 2, 3])
         b = np.array([5, 6, 7], dtype=other_dtype)
-
-        if ufunc in no_complex and issubclass(other_dtype, np.complexfloating):
-            raise SkipTest(f"{ufunc} does not accept complex.")
 
         # __op__
         result = op(a, b)

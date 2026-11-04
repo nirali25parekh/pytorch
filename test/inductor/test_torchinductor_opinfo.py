@@ -34,6 +34,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    decorateIf,
     HardwareClassification,
     IS_ARM64,
     IS_CI,
@@ -1463,6 +1464,19 @@ class TestInductorOpInfo(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
+    @decorateIf(
+        unittest.skip("Skipped!"),
+        lambda params: params["op"].full_name
+        not in (
+            "nn.functional.interpolate.bilinear",
+            "nn.functional.interpolate.bicubic",
+            "nn.functional.upsample_bilinear",
+            "nn.functional.upsample_nearest",
+            "fill",
+            "full_like",
+        )
+        and params["dtype"] not in (f16, f32, f64, i32, i64, b8),
+    )
     @_ops(op_db[START:END])
     @skipOps(test_skips_or_fails)
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
@@ -1481,19 +1495,6 @@ class TestInductorOpInfo(TestCase):
         op_name = op.name
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"
-
-        # Skip dtype=torch.uint8 for all ops except upsample and interpolate:
-        allowed_dtypes = [f16, f32, f64, i32, i64, b8]
-        if op_name not in (
-            "nn.functional.interpolate.bilinear",
-            "nn.functional.interpolate.bicubic",
-            "nn.functional.upsample_bilinear",
-            "nn.functional.upsample_nearest",
-            "fill",
-            "full_like",
-        ):
-            if dtype not in allowed_dtypes:
-                raise unittest.SkipTest("Skipped!")
 
         # with open("test_output.txt", "a") as f:
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |

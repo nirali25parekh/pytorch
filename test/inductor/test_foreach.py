@@ -11,6 +11,7 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
@@ -963,16 +964,13 @@ class ForeachTests(TestCase):
         torch.compile(fn)(*args)
         return torch._inductor.metrics.ir_nodes_pre_fusion
 
+    @decorateIf(
+        unittest.skip("requires GPU"),
+        lambda params: params["device"] != "cpu" and (not HAS_GPU),
+    )
     @parametrize("case", ("add", "mul_self", "sgd_momentum"))
     @parametrize("device", ("cpu", GPU_TYPE))
     def test_inplace_foreach_computed_into_target(self, device, case):
-        # The value of an in-place foreach op that reads its target only where
-        # it writes it is computed straight into the target, not into a
-        # buffer of its own that is then copied. The scheduler would fuse
-        # such a copy back into one kernel, so count the nodes before fusion.
-        if device != "cpu" and not HAS_GPU:
-            self.skipTest("requires GPU")
-
         if case == "sgd_momentum":
             params = [
                 torch.randn(8, 8, device=device, requires_grad=True) for _ in range(3)
@@ -999,15 +997,12 @@ class ForeachTests(TestCase):
         self.assertEqual(self._nodes_pre_fusion(fn, x, y), 1)
         self.assertEqual(x, x_eager)
 
+    @decorateIf(
+        unittest.skip("requires GPU"),
+        lambda params: params["device"] != "cpu" and (not HAS_GPU),
+    )
     @parametrize("device", ("cpu", GPU_TYPE))
     def test_inplace_foreach_reads_target_elsewhere(self, device):
-        # https://github.com/pytorch/pytorch/issues/198033: computed straight
-        # into x, the value would read rows of x that it has already written
-        # (on a GPU, that another block has). It gets a buffer of its own,
-        # which is then copied into x: two nodes.
-        if device != "cpu" and not HAS_GPU:
-            self.skipTest("requires GPU")
-
         def fn(x):
             torch._foreach_add_([x], [x.flip(0)])
 

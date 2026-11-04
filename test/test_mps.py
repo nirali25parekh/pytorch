@@ -23,7 +23,7 @@ from collections import defaultdict
 from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (parametrize, run_tests, TestCase, MACOS_VERSION, IS_CI,
+    (decorateIf, parametrize, run_tests, TestCase, MACOS_VERSION, IS_CI,
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier
 from torch.testing import make_tensor
@@ -7271,21 +7271,28 @@ class TestMPS(TestCaseMPS):
                 atol=0, rtol=0
             )
 
+    skip_sort_k_frac = decorateIf(
+        unittest.skip("k_frac only applies to kth/topk"),
+        lambda p: p["mode"] == "sort" and p["k_frac"] != "lo",
+    )
+    skip_kth_descending = decorateIf(
+        unittest.skip("kthvalue has no descending parameter"),
+        lambda p: p["mode"] == "kth" and p["descending"],
+    )
+
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.int32, torch.int64])
     @parametrize("descending", [False, True])
     @parametrize("dup", [False, True])
     @parametrize("mode", ["sort", "kth", "topk"])
     @parametrize("k_frac", ["lo", "mid", "hi"])
+    @skip_sort_k_frac
+    @skip_kth_descending
     def test_sort_single_block(self, dtype, descending, dup, mode, k_frac):
         # Shapes that hit the Metal single-block path: n_rows >= 2, last-dim,
         # sort_size within one threadgroup (<=4096, or <=1024 for 8-byte types).
         # dup=True uses a small value range so many elements collide; this exercises
         # the tie-break path in the bitonic sort (equal values must still produce
         # valid index permutations).
-        if mode == "sort" and k_frac != "lo":
-            self.skipTest("k_frac only applies to kth/topk")
-        if mode == "kth" and descending:
-            self.skipTest("kthvalue has no descending parameter")
         max_ss = 1024 if dtype == torch.int64 else 4096
         lo, hi = (0, 5) if dup else (-1000, 1000)
 
@@ -7350,12 +7357,10 @@ class TestMPS(TestCaseMPS):
     @parametrize("dup", [False, True])
     @parametrize("mode", ["sort", "kth", "topk"])
     @parametrize("k_frac", ["lo", "mid", "hi"])
+    @skip_sort_k_frac
+    @skip_kth_descending
     def test_sort_multi_block(self, dtype, descending, dup, mode, k_frac):
         # shapes chosen to hit the metal multi block merge path
-        if mode == "sort" and k_frac != "lo":
-            self.skipTest("k_frac only applies to kth/topk")
-        if mode == "kth" and descending:
-            self.skipTest("kthvalue has no descending parameter")
         cases = {
             2: [((1, 4096), -1), ((2, 3000), -1)],
             4: [((1, 2049), -1), ((1, 8192), -1), ((2, 16384), -1),
@@ -7403,16 +7408,16 @@ class TestMPS(TestCaseMPS):
     @parametrize("dup", [False, True])
     @parametrize("mode", ["sort", "kth", "topk"])
     @parametrize("k_frac", ["lo", "mid", "hi"])
+    @skip_sort_k_frac
+    @skip_kth_descending
+    @decorateIf(
+        unittest.skip("kthvalue/topk not supported for bool"),
+        lambda p: p["mode"] in ("kth", "topk") and p["dtype"] == torch.bool,
+    )
     def test_sort_radix(self, dtype, descending, dup, mode, k_frac):
         # Shapes chosen to hit the Metal radix path: 4-byte needs sort_size >= 65536,
         # 2/1-byte needs sort_size > 4096; n_rows >= 32 with 2-byte triggers the
         # small_tg (RTPTG=512) variant. Strided cases exercise non-contiguous input.
-        if mode == "sort" and k_frac != "lo":
-            self.skipTest("k_frac only applies to kth/topk")
-        if mode == "kth" and descending:
-            self.skipTest("kthvalue has no descending parameter")
-        if mode in ("kth", "topk") and dtype == torch.bool:
-            self.skipTest("kthvalue/topk not supported for bool")
         if torch.tensor([], dtype=dtype).element_size() == 4:
             cases = [((4, 65536), -1), ((1, 1048576), -1), ((8, 131072), -1),
                      ((4, 8, 65536), 2), ((2, 65536, 4), 1)]
@@ -12475,11 +12480,13 @@ class TestSDPA(TestCaseMPS):
     @parametrize("is_causal", [False, True])
     @parametrize("broadcast_mask", [False, True])
     @parametrize("gqa_factor", [1, 4])
+    @decorateIf(
+        unittest.skip("PyTorch SDPA disallows attn_mask together with is_causal"),
+        lambda p: p["is_causal"] and p["with_mask"],
+    )
     def test_fast_vector_attention(
         self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool, broadcast_mask: bool, gqa_factor: int
     ):
-        if is_causal and with_mask:
-            self.skipTest("PyTorch SDPA disallows attn_mask together with is_causal")
         batch = 2  # >1 so that batch-stride mistakes are observable
         NH_kv = 2
         NH_q = NH_kv * gqa_factor
@@ -12495,11 +12502,13 @@ class TestSDPA(TestCaseMPS):
     @parametrize("is_causal", [False, True])
     @parametrize("broadcast_mask", [False, True])
     @parametrize("gqa_factor", [1, 4])
+    @decorateIf(
+        unittest.skip("PyTorch SDPA disallows attn_mask together with is_causal"),
+        lambda p: p["is_causal"] and p["with_mask"],
+    )
     def test_fast_vector_attention_2pass(
         self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool, is_causal: bool, broadcast_mask: bool, gqa_factor: int
     ):
-        if is_causal and with_mask:
-            self.skipTest("PyTorch SDPA disallows attn_mask together with is_causal")
         batch = 2  # >1 so that batch-stride mistakes are observable
         NH_kv = 8
         NH_q = NH_kv * gqa_factor

@@ -2303,9 +2303,12 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         test_<x>.py` does: its own fresh process, a cwd that is not the
         repository, no arguments, and the REAL `run_this_suite`, loader and
         runner. That catches a module that only fails as a script (a relative
-        or package-absolute import), a `__main__` that is not
-        `run_this_suite()`, and a path or `discover` argument that finds a
-        narrower tree. Only what discovery returns is swapped, for as many
+        or package-absolute import), a `__main__` that never hands the suite to
+        the runner (`pass`, `unittest.main()`, an argv guard), and a path or
+        `discover` argument that finds a narrower tree. Every sentinel passes,
+        so a `__main__` that swallows a failing status is not caught here; the
+        stub above covers `run_this_suite`'s own status mapping. Only what
+        discovery returns is swapped, for as many
         sentinel tests as it found: the suite this run is part of already
         executes every test, so each entry point only has to find them all and
         hand every one to the runner.
@@ -2383,9 +2386,9 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         )
 
         # Each child leads its own process group, so a timeout kills whatever
-        # it spawned too, unless that started a session of its own. Otherwise
-        # a grandchild holding stderr open keeps the drain below waiting after
-        # the child itself is dead.
+        # it spawned too, unless that moved to a process group of its own.
+        # Otherwise a grandchild holding stderr open keeps the drain below
+        # waiting after the child itself is dead.
         def kill_tree(child):
             try:
                 os.killpg(child.pid, signal.SIGKILL)
